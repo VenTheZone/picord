@@ -21,6 +21,7 @@ export interface PicordFileConfig {
   thinkingLevel?: ThinkingLevel;
   modelProvider?: string;
   modelId?: string;
+  critiqueAutoShare?: boolean;
   systemPromptAppend?: string;
 }
 
@@ -46,6 +47,7 @@ export interface PicordRuntimeConfig extends PicordFileConfig {
   hostChannelName: string;
   registerCommands: boolean;
   thinkingLevel: ThinkingLevel;
+  critiqueAutoShare: boolean;
   systemPromptAppend: string;
 }
 

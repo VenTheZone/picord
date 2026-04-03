@@ -14,6 +14,7 @@ import {
   type Skill,
 } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
+import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
 import { AccessApprovalManager } from "./access-approval.js";
 import type { AccessContext } from "./path-policy.js";
 import { WorkspaceGuard } from "./path-policy.js";
@@ -230,6 +231,10 @@ export class PiSessionPool {
       const handle = await this.getOrCreateSession(options);
       await this.syncSessionName(handle.session, options.sessionName);
 
+      const diffFingerprintBefore = this.config.critiqueAutoShare
+        ? await getGitStatusFingerprint(this.getWorkspaceRootForKey(options.workspaceKey))
+        : undefined;
+
       const chunks: string[] = [];
       const unsubscribe = handle.session.subscribe((event) => {
         if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
@@ -243,8 +248,26 @@ export class PiSessionPool {
         unsubscribe();
       }
 
-      const response = chunks.join("").trim();
-      return response || "Done.";
+      const response = chunks.join("").trim() || "Done.";
+      if (!this.config.critiqueAutoShare) {
+        return response;
+      }
+
+      const workspaceRoot = this.getWorkspaceRootForKey(options.workspaceKey);
+      const diffFingerprintAfter = await getGitStatusFingerprint(workspaceRoot);
+      if (!diffFingerprintAfter || diffFingerprintAfter === diffFingerprintBefore) {
+        return response;
+      }
+
+      const critique = await shareGitDiff({
+        cwd: workspaceRoot,
+        title: `${path.basename(workspaceRoot)}: Discord run`,
+      });
+      if (!critique?.url) {
+        return response;
+      }
+
+      return `${response}\n\nDiff: ${critique.url}`;
     });
   }
 

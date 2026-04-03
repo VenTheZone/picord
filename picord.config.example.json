@@ -16,5 +16,6 @@
   "hostChannelName": "host",
   "registerCommands": true,
   "thinkingLevel": "off",
+  "critiqueAutoShare": false,
   "systemPromptAppend": "Keep Discord responses concise unless the user asks for detail."
 }

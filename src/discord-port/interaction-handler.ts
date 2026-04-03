@@ -9,7 +9,10 @@ import {
   type ChatInputCommandInteraction,
   type Client,
   type Interaction,
+  type TextChannel,
 } from "discord.js";
+import fs from "node:fs";
+import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
 import type { ApprovalDecisionMode } from "../access-approval.js";
 import {
@@ -17,6 +20,7 @@ import {
   extractMemberRoleIds,
   getWorkspaceChannelIdFromInteraction,
 } from "./access-control.js";
+import { isGitWorkspace, reviewGitDiff, shareGitDiff } from "../critique.js";
 import { buildPromptFromInteraction, replyToInteraction } from "./message-helpers.js";
 import type { DiscordPortRuntime } from "./runtime.js";
 
@@ -75,6 +79,7 @@ function isOwnerAdminCommand(commandName: string): boolean {
   return [
     "reload",
     "project-create",
+    "add-project",
     "project-list",
     "access-requests",
     "access-allow",
@@ -116,6 +121,43 @@ function buildScopeModelsPrompt({ provider, totalMatches, truncated, query }: {
     truncated ? `Showing the first 25 of ${totalMatches} matches. Narrow the query if needed.` : `Matches: ${totalMatches}`,
     "This replaces the workspace scope. Use /use-model after this to choose the active model.",
   ].filter((line): line is string => Boolean(line)).join("\n");
+}
+
+function resolveProjectDirectory(baseDir: string, inputPath: string): string {
+  const trimmed = inputPath.trim();
+  const expanded = trimmed === "~"
+    ? process.env.HOME ?? trimmed
+    : trimmed.startsWith("~/")
+      ? path.join(process.env.HOME ?? "", trimmed.slice(2))
+      : trimmed;
+  return path.isAbsolute(expanded) ? expanded : path.resolve(baseDir, expanded);
+}
+
+function requireBindableGuildTextChannel(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): TextChannel {
+  const channel = interaction.channel;
+  if (!channel || channel.type !== ChannelType.GuildText) {
+    throw new Error("Current-channel mode only works in a guild text channel.");
+  }
+  if (isHostControlChannel(interaction, runtime)) {
+    throw new Error("The host control channel cannot be rebound as a project channel.");
+  }
+  return channel;
+}
+
+function getCritiqueWorkspaceRoot(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): string {
+  if (!interaction.guildId) {
+    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+  }
+
+  if (interaction.channel?.isThread()) {
+    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+  }
+
+  if (runtime.adapter.isManagedProjectChannel(interaction.channelId)) {
+    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+  }
+
+  throw new Error("Use this command in a managed project channel, a session thread, or a DM.");
 }
 
 async function checkInteractionAccess(
@@ -237,7 +279,9 @@ export function registerDiscordPortInteractionHandler({
 
       if (interaction.guildId && ownerAdminCommand) {
         requireOwner(interaction, runtime);
-        requireHostChannel(interaction, runtime);
+        if (interaction.commandName !== "add-project" || interaction.options.getString("mode") !== "current-channel") {
+          requireHostChannel(interaction, runtime);
+        }
       }
 
       if (!access.allowed) {
@@ -274,6 +318,58 @@ export function registerDiscordPortInteractionHandler({
           content: created.created
             ? `Created <#${created.textChannelId}> mapped to ${created.projectDirectory}`
             : `Reusing <#${created.textChannelId}> mapped to ${created.projectDirectory}`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.commandName === "add-project") {
+        requireGuild(interaction);
+        const projectDirectory = resolveProjectDirectory(runtime.adapter.config.cwd, interaction.options.getString("path", true));
+        if (!fs.existsSync(projectDirectory) || !fs.statSync(projectDirectory).isDirectory()) {
+          await interaction.reply({
+            content: `Directory does not exist: ${projectDirectory}`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const mode = interaction.options.getString("mode", true);
+        const projectName = interaction.options.getString("name")?.trim() || undefined;
+        const gitWarning = await isGitWorkspace(projectDirectory)
+          ? undefined
+          : "Warning: this directory is not inside a Git repository.";
+
+        if (mode === "current-channel") {
+          const channel = requireBindableGuildTextChannel(interaction, runtime);
+          const bound = await runtime.bindCurrentProjectChannel({
+            channel,
+            projectDirectory,
+            projectName,
+          });
+          await interaction.reply({
+            content: [
+              `Bound <#${bound.textChannelId}> to ${projectDirectory}`,
+              gitWarning,
+            ].filter(Boolean).join("\n"),
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        const created = await runtime.addExistingProjectChannel({
+          guild: interaction.guild!,
+          projectDirectory,
+          projectName,
+          requestedBy: interaction.user,
+        });
+        await interaction.reply({
+          content: [
+            created.created
+              ? `Created <#${created.textChannelId}> mapped to ${projectDirectory}`
+              : `Reusing <#${created.textChannelId}> mapped to ${projectDirectory}`,
+            gitWarning,
+          ].filter(Boolean).join("\n"),
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -433,6 +529,41 @@ export function registerDiscordPortInteractionHandler({
       if (interaction.commandName === "project-list") {
         requireGuild(interaction);
         await replyToInteraction(interaction, await runtime.describeManagedProjects(interaction.guild!));
+        return;
+      }
+
+      if (interaction.commandName === "diff") {
+        const workspaceRoot = getCritiqueWorkspaceRoot(interaction, runtime);
+        if (!await isGitWorkspace(workspaceRoot)) {
+          await interaction.reply({
+            content: `Workspace is not inside a Git repository: ${workspaceRoot}`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const result = await shareGitDiff({
+          cwd: workspaceRoot,
+          title: `${path.basename(workspaceRoot)}: Discord /diff`,
+        });
+        await replyToInteraction(interaction, result?.url ?? result?.error ?? "No changes to show.");
+        return;
+      }
+
+      if (interaction.commandName === "review") {
+        const workspaceRoot = getCritiqueWorkspaceRoot(interaction, runtime);
+        if (!await isGitWorkspace(workspaceRoot)) {
+          await interaction.reply({
+            content: `Workspace is not inside a Git repository: ${workspaceRoot}`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const result = await reviewGitDiff({ cwd: workspaceRoot });
+        await replyToInteraction(interaction, result?.url ?? result?.error ?? "No review output was generated.");
         return;
       }
 

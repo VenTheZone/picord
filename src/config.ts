@@ -133,6 +133,7 @@ export function loadRuntimeConfig(
         : DEFAULT_HOST_CHANNEL_NAME,
     registerCommands: normalizeBoolean(fileConfig.registerCommands, true),
     thinkingLevel: normalizeThinkingLevel(fileConfig.thinkingLevel),
+    critiqueAutoShare: normalizeBoolean(fileConfig.critiqueAutoShare, false),
     systemPromptAppend:
       typeof fileConfig.systemPromptAppend === "string" ? fileConfig.systemPromptAppend.trim() : "",
   };

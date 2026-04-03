@@ -32,12 +32,32 @@ export async function createNewProject({
     guild,
     projectDirectory,
     adapter,
+    projectName: sanitizedName,
   });
 
   return {
     ...result,
     projectDirectory,
   };
+}
+
+export async function addExistingProject({
+  guild,
+  projectDirectory,
+  adapter,
+  projectName,
+}: {
+  guild: Guild;
+  projectDirectory: string;
+  adapter: DiscordPortRuntimeAdapter;
+  projectName?: string;
+}): Promise<DiscordPortProjectCreationResult> {
+  return createProjectChannel({
+    guild,
+    projectDirectory,
+    adapter,
+    projectName,
+  });
 }
 
 export async function postProjectCreatedMessage({

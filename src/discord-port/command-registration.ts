@@ -13,7 +13,10 @@ const RESERVED_COMMAND_NAMES = new Set([
   "use-model",
   "reload",
   "project-create",
+  "add-project",
   "project-list",
+  "diff",
+  "review",
   "access-requests",
   "access-allow",
   "access-deny",
@@ -106,6 +109,35 @@ function buildProjectCreateCommand(): RESTPostAPIChatInputApplicationCommandsJSO
     .toJSON();
 }
 
+function buildAddProjectCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("add-project")
+    .setDescription("Map an existing local project path to a Discord project channel")
+    .addStringOption((option) =>
+      option
+        .setName("path")
+        .setDescription("Existing local directory path")
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("mode")
+        .setDescription("Create a new project channel or bind the current channel")
+        .addChoices(
+          { name: "new-channel", value: "new-channel" },
+          { name: "current-channel", value: "current-channel" },
+        )
+        .setRequired(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("name")
+        .setDescription("Optional project/channel name")
+        .setRequired(false),
+    )
+    .toJSON();
+}
+
 function buildResumeCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("resume")
@@ -145,6 +177,20 @@ function buildProjectListCommand(): RESTPostAPIChatInputApplicationCommandsJSONB
   return new SlashCommandBuilder()
     .setName("project-list")
     .setDescription("List managed project channels")
+    .toJSON();
+}
+
+function buildDiffCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("diff")
+    .setDescription("Upload the current git diff to critique.work")
+    .toJSON();
+}
+
+function buildReviewCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("review")
+    .setDescription("Generate a critique.work review for the current git diff")
     .toJSON();
 }
 
@@ -205,11 +251,14 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildUseModelCommand(),
     buildReloadCommand(),
     buildProjectCreateCommand(),
+    buildAddProjectCommand(),
     buildResumeCommand(),
     buildSessionsCommand(),
     buildAbortCommand(),
     buildResetCommand(),
     buildProjectListCommand(),
+    buildDiffCommand(),
+    buildReviewCommand(),
     buildAccessRequestsCommand(),
     buildAccessAllowCommand(),
     buildAccessDenyCommand(),

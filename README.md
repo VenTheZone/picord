@@ -181,6 +181,7 @@ export PICORD_RUNTIME_ARCH=legacy
   "hostChannelName": "host",
   "registerCommands": true,
   "thinkingLevel": "off",
+  "critiqueAutoShare": false,
   "systemPromptAppend": "Prefer concise Discord-friendly replies."
 }
 ```
@@ -198,6 +199,7 @@ export PICORD_RUNTIME_ARCH=legacy
 - `hostChannelId`: exact control channel ID for owner/admin commands
 - `hostChannelName`: fallback control channel name; defaults to `host`
 - `blockedPathPatterns`: sensitive files that stay blocked or approval-gated
+- `critiqueAutoShare`: when true, picord appends a critique.work diff link after Discord runs that change the git working tree
 
 ## How to use it
 
@@ -210,11 +212,14 @@ export PICORD_RUNTIME_ARCH=legacy
 
 Use the host control channel for owner and admin actions like:
 - `/project-create`
+- `/add-project` in `new-channel` mode
 - `/project-list`
 - `/reload`
 - `/access-requests`
 - `/access-allow`
 - `/access-deny`
+
+For `/add-project` in `current-channel` mode, run it as the owner in the channel you want to bind.
 
 ### In DMs
 
@@ -232,6 +237,11 @@ DMs work as a direct session using the configured default workspace.
 - `/status`
 - `/scope-models provider:<provider> query:<optional filter>`
 - `/use-model model:<provider/model>`
+- `/diff`
+- `/review`
+
+`/diff` uploads the current git diff to critique.work and returns the shareable URL.
+`/review` asks critique to generate a review for the current diff and returns the review URL.
 
 ### Owner and admin
 
@@ -239,6 +249,7 @@ These must be run in the configured host control channel.
 
 - `/reload`
 - `/project-create name:<project-name>`
+- `/add-project path:<path> mode:<new-channel|current-channel> name:<optional>`
 - `/project-list`
 - `/access-requests`
 - `/access-allow request_id:<id> mode:once|always`

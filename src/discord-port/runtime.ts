@@ -1,9 +1,9 @@
-import { ChannelType, type Client, type Guild, type Message, type TextChannel, type ThreadChannel } from "discord.js";
+import { ChannelType, type Client, type Guild, type Message, type TextChannel, type ThreadChannel, type User } from "discord.js";
 import path from "node:path";
 import { buildPromptFromMessage } from "./message-helpers.js";
 import type { ModelSummary } from "../types.js";
 import type { DiscordPortRuntimeAdapter, DiscordPortThreadBinding, PiAvailableSessionSummary } from "./types.js";
-import { createNewProject, postProjectCreatedMessage } from "./project-management.js";
+import { addExistingProject, createNewProject, postProjectCreatedMessage } from "./project-management.js";
 
 export class DiscordPortRuntime {
   constructor(
@@ -40,6 +40,57 @@ export class DiscordPortRuntime {
     }
 
     return created;
+  }
+
+  async addExistingProjectChannel({
+    guild,
+    projectDirectory,
+    projectName,
+    requestedBy,
+  }: {
+    guild: Guild;
+    projectDirectory: string;
+    projectName?: string;
+    requestedBy?: User | { id: string };
+  }) {
+    const created = await addExistingProject({
+      guild,
+      projectDirectory,
+      adapter: this.adapter,
+      projectName,
+    });
+
+    const fetched = await guild.channels.fetch(created.textChannelId);
+    if (fetched?.type === 0) {
+      await postProjectCreatedMessage({
+        textChannel: fetched as TextChannel,
+        user: requestedBy ? ({ id: requestedBy.id } as { id: string }) as never : undefined,
+        projectDirectory,
+      });
+    }
+
+    return created;
+  }
+
+  async bindCurrentProjectChannel({
+    channel,
+    projectDirectory,
+    projectName,
+  }: {
+    channel: TextChannel;
+    projectDirectory: string;
+    projectName?: string;
+  }) {
+    const name = projectName?.trim() || channel.name;
+    await this.adapter.addManagedProject(channel.id, projectDirectory, name);
+    await channel.setTopic(`picord workspace → ${projectDirectory}`).catch(() => undefined);
+    return {
+      textChannelId: channel.id,
+      channelName: channel.name,
+      projectDirectory,
+      sanitizedName: name,
+      created: false,
+    };
   }
 
   buildWorkspaceKey(guildId: string, channelId: string): string {

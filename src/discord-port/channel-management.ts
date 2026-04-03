@@ -36,12 +36,14 @@ export async function createProjectChannel({
   guild,
   projectDirectory,
   adapter,
+  projectName,
 }: {
   guild: Guild;
   projectDirectory: string;
   adapter: DiscordPortRuntimeAdapter;
+  projectName?: string;
 }): Promise<DiscordPortProjectCreationResult> {
-  const sanitizedName = sanitizeProjectName(path.basename(projectDirectory));
+  const sanitizedName = sanitizeProjectName(projectName ?? path.basename(projectDirectory));
   if (!sanitizedName) {
     throw new Error("Invalid project name.");
   }
