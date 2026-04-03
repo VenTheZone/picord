@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.run/
+.env
+.env.*
+!.env.example
+picord.state.json
+picord.state.json.lock
+picord.config.json
+picord.confg.json
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx

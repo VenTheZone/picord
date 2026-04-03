@@ -1,0 +1,20 @@
+{
+  "allowDm": true,
+  "cwd": ".",
+  "statePath": "./picord.state.json",
+  "workspaceBasePath": "~/.picord/workspace",
+  "workspaceRoots": {},
+  "toolMode": "coding",
+  "allowedGuildIds": ["YOUR_GUILD_ID"],
+  "allowedChannelIds": [],
+  "allowedRoleIds": [],
+  "allowedRoleNames": ["picord"],
+  "allowedUserIds": [],
+  "ownerUserId": "YOUR_DISCORD_OWNER_USER_ID",
+  "blockedPathPatterns": [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519"],
+  "hostChannelId": "OPTIONAL_HOST_CHANNEL_ID",
+  "hostChannelName": "host",
+  "registerCommands": true,
+  "thinkingLevel": "off",
+  "systemPromptAppend": "Keep Discord responses concise unless the user asks for detail."
+}
