@@ -2,6 +2,8 @@
 
 `picord` is a Discord integration extension for pi / pi-mono.
 
+npm package: `@venthezone/picord`
+
 It lets you run pi from Discord while keeping pi’s native sessions, models, skills, and extensions.
 
 ## Mental model
@@ -94,9 +96,21 @@ That intent is required for the full message-driven guild flow.
 
 For normal use, install picord as a persistent pi extension.
 
-You can do that in either of these ways:
-- add this package path to your pi extension settings, or
-- symlink or copy the repo into `~/.pi/agent/extensions/picord/`
+The published package name is:
+
+```bash
+@venthezone/picord
+```
+
+You can install it through pi with:
+
+```bash
+pi install npm:@venthezone/picord
+```
+
+You can also use the local repo directly by either:
+- adding this package path to your pi extension settings, or
+- symlinking or copying the repo into `~/.pi/agent/extensions/picord/`
 
 This repo already declares its extension entrypoint in `package.json`:
 

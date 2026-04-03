@@ -1,9 +1,33 @@
 {
-  "name": "picord",
-  "private": true,
+  "name": "@venthezone/picord",
   "version": "0.1.0",
   "type": "module",
-  "description": "Discord integration extension for pi / pi-mono",
+  "description": "Discord integration extension for pi that maps project channels to workspaces and threads to native pi sessions.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-mono",
+    "discord",
+    "discord-bot",
+    "typescript"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VenTheZone/picord.git"
+  },
+  "homepage": "https://github.com/VenTheZone/picord#readme",
+  "bugs": {
+    "url": "https://github.com/VenTheZone/picord/issues"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    ".env.example",
+    "picord.config.example.json",
+    "tsconfig.json"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -23,11 +47,15 @@
     ]
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.64.0",
-    "@sinclair/typebox": "^0.34.41",
     "discord.js": "^14.19.3"
   },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.64.0",
+    "@sinclair/typebox": "^0.34.41",
     "@types/node": "^24.3.0",
     "typescript": "^5.7.3",
     "vitest": "^3.2.4"
