@@ -29,7 +29,8 @@ In DMs:
 - project channel → workspace mapping
 - thread → pi session binding
 - pi skills exposed as slash commands
-- model controls from Discord
+- model and thinking controls from Discord
+- provider login and API key update flow from Discord
 - native pi session resume support
 - workspace-only file access by default
 - approval flow for blocked or out-of-workspace access
@@ -130,7 +131,39 @@ If you just want to try picord without installing it persistently, run:
 pi -e ./src/index.ts --no-session
 ```
 
-### 7. Verify the setup
+### 7. Run picord in tmux
+
+For a stable VPS/runtime setup, run picord in its own tmux session from the local repo source.
+
+Start it:
+
+```bash
+cd /path/to/picord
+set -a && source .env && set +a
+npm run sync:discord-commands
+
+tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+```
+
+Useful tmux commands:
+
+```bash
+# attach to the running session
+tmux attach -t picord
+
+# stop picord
+tmux kill-session -t picord
+
+# restart picord after code changes
+tmux kill-session -t picord 2>/dev/null || true
+npm run build
+npm run sync:discord-commands
+tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+```
+
+This is the recommended way to keep picord running on a remote machine while still using the live local source tree.
+
+### 8. Verify the setup
 
 ```bash
 npm run check
@@ -212,14 +245,21 @@ export PICORD_RUNTIME_ARCH=legacy
 
 Use the host control channel for owner and admin actions like:
 - `/project-create`
-- `/add-project` in `new-channel` mode
+- `/add-project`
+- `/add-project-path`
 - `/project-list`
+- `/project-list-available`
+- `/session`
+- `/login`
 - `/reload`
 - `/access-requests`
 - `/access-allow`
 - `/access-deny`
 
-For `/add-project` in `current-channel` mode, run it as the owner in the channel you want to bind.
+`/add-project` opens a picker for direct subfolders under `workspaceBasePath` and creates or reuses a project channel automatically.
+For advanced manual binding, use `/add-project-path`. In `current-channel` mode, run it as the owner in the channel you want to bind.
+
+`/session` works in the host channel and lets you pick an existing pi session. Picord will create or reuse the matching project channel for that session's workspace, create a thread, and resume the selected session there.
 
 ### In DMs
 
@@ -231,12 +271,15 @@ DMs work as a direct session using the configured default workspace.
 
 - `/ask prompt:<text>`
 - `/abort`
+- `/refresh-session`
 - `/resume session:<session-file-or-id>`
 - `/sessions`
 - `/reset`
 - `/status`
 - `/scope-models provider:<provider> query:<optional filter>`
 - `/use-model model:<provider/model>`
+- `/model model:<provider/model>`
+- `/think level:<none|low|medium|high|xhigh>`
 - `/diff`
 - `/review`
 
@@ -248,9 +291,13 @@ DMs work as a direct session using the configured default workspace.
 These must be run in the configured host control channel.
 
 - `/reload`
+- `/login`
 - `/project-create name:<project-name>`
-- `/add-project path:<path> mode:<new-channel|current-channel> name:<optional>`
+- `/add-project`
+- `/add-project-path path:<path> mode:<new-channel|current-channel> name:<optional>`
 - `/project-list`
+- `/project-list-available`
+- `/session`
 - `/access-requests`
 - `/access-allow request_id:<id> mode:once|always`
 - `/access-deny request_id:<id>`
@@ -291,8 +338,20 @@ npm run smoke:discord:legacy
 npm run sync:discord-commands
 ```
 
+If you are running picord from the local source tree in tmux on a VPS, the usual update cycle is:
+
+```bash
+cd /path/to/picord
+npm run build
+npm run sync:discord-commands
+
+tmux kill-session -t picord 2>/dev/null || true
+tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+```
+
 ## Current limitations
 
 - Full guild message flow depends on **Message Content Intent** being enabled on the Discord app
 - DMs and unmapped channels still fall back to the configured default `cwd`
+- OpenAI Codex login in picord currently uses a Discord-guided manual completion flow rather than a native one-time device-code screen
 - Bash safety is path-based and conservative; direct tool access is guarded more strictly than arbitrary shell behavior

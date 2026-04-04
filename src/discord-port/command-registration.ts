@@ -5,16 +5,23 @@ const RESERVED_COMMAND_NAMES = new Set([
   "ask",
   "abort",
   "reset",
+  "refresh-session",
   "resume",
+  "session",
   "sessions",
   "status",
+  "model",
   "models",
   "scope-models",
   "use-model",
+  "think",
+  "login",
   "reload",
   "project-create",
   "add-project",
+  "add-project-path",
   "project-list",
+  "project-list-available",
   "diff",
   "review",
   "access-requests",
@@ -75,9 +82,9 @@ function buildScopeModelsCommand(): RESTPostAPIChatInputApplicationCommandsJSONB
     .toJSON();
 }
 
-function buildUseModelCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+function buildUseModelCommand(commandName: "use-model" | "model" = "use-model"): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
-    .setName("use-model")
+    .setName(commandName)
     .setDescription("Set the active workspace model")
     .addStringOption((option) =>
       option
@@ -86,6 +93,33 @@ function buildUseModelCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody
         .setRequired(true)
         .setAutocomplete(true),
     )
+    .toJSON();
+}
+
+function buildThinkCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("think")
+    .setDescription("Set the active thinking level")
+    .addStringOption((option) =>
+      option
+        .setName("level")
+        .setDescription("Thinking level")
+        .addChoices(
+          { name: "none", value: "off" },
+          { name: "low", value: "low" },
+          { name: "medium", value: "medium" },
+          { name: "high", value: "high" },
+          { name: "xhigh", value: "xhigh" },
+        )
+        .setRequired(true),
+    )
+    .toJSON();
+}
+
+function buildLoginCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("login")
+    .setDescription("Choose a provider and update its login or API key")
     .toJSON();
 }
 
@@ -112,7 +146,14 @@ function buildProjectCreateCommand(): RESTPostAPIChatInputApplicationCommandsJSO
 function buildAddProjectCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("add-project")
-    .setDescription("Map an existing local project path to a Discord project channel")
+    .setDescription("Pick an existing project and create or reuse its Discord project channel")
+    .toJSON();
+}
+
+function buildAddProjectPathCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("add-project-path")
+    .setDescription("Advanced: map an existing local project path to a Discord project channel")
     .addStringOption((option) =>
       option
         .setName("path")
@@ -159,6 +200,13 @@ function buildSessionsCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody
     .toJSON();
 }
 
+function buildSessionCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("session")
+    .setDescription("Pick an existing pi session and create or reuse its project channel")
+    .toJSON();
+}
+
 function buildAbortCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("abort")
@@ -173,10 +221,24 @@ function buildResetCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
     .toJSON();
 }
 
+function buildRefreshSessionCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("refresh-session")
+    .setDescription("Reset this thread session so you can start clean")
+    .toJSON();
+}
+
 function buildProjectListCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("project-list")
     .setDescription("List managed project channels")
+    .toJSON();
+}
+
+function buildProjectListAvailableCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("project-list-available")
+    .setDescription("List direct subfolders under the configured workspace base path")
     .toJSON();
 }
 
@@ -249,14 +311,21 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAskCommand(),
     buildScopeModelsCommand(),
     buildUseModelCommand(),
+    buildUseModelCommand("model"),
+    buildThinkCommand(),
+    buildLoginCommand(),
     buildReloadCommand(),
     buildProjectCreateCommand(),
     buildAddProjectCommand(),
+    buildAddProjectPathCommand(),
     buildResumeCommand(),
+    buildSessionCommand(),
     buildSessionsCommand(),
     buildAbortCommand(),
     buildResetCommand(),
+    buildRefreshSessionCommand(),
     buildProjectListCommand(),
+    buildProjectListAvailableCommand(),
     buildDiffCommand(),
     buildReviewCommand(),
     buildAccessRequestsCommand(),

@@ -8,7 +8,5 @@ picord.state.json
 picord.state.json.lock
 picord.config.json
 picord.confg.json
-**/*.test.ts
-**/*.test.tsx
-**/*.spec.ts
-**/*.spec.tsx
+.picord.log
+.picord.pid

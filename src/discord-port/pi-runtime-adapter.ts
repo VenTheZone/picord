@@ -1,8 +1,9 @@
 import type { ApprovalDecisionMode } from "../access-approval.js";
 import type { PiSessionPool } from "../pi-session.js";
-import type { ModelSummary, PicordRuntimeConfig, SkillSummary } from "../types.js";
+import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel } from "../types.js";
 import type {
   DiscordPortRuntimeAdapter,
+  LoginProviderOption,
   ManagedProjectRecord,
   PiAvailableSessionSummary,
   PiBoundSessionSummary,
@@ -67,6 +68,10 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.listSessionsForWorkspace(workspaceKey, limit);
   }
 
+  listAllSessions(limit?: number) {
+    return this.sessionPool.listAllSessions(limit);
+  }
+
   setWorkspaceModelScope(workspaceKey: string, rawPatterns: string) {
     return this.sessionPool.setWorkspaceModelScope(workspaceKey, rawPatterns);
   }
@@ -77,6 +82,42 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
 
   setWorkspaceModel(workspaceKey: string, modelReference: string): Promise<ModelSummary> {
     return this.sessionPool.setWorkspaceModel(workspaceKey, modelReference);
+  }
+
+  setConversationModel(conversationKey: string, workspaceKey: string, modelReference: string): Promise<ModelSummary> {
+    return this.sessionPool.setConversationModel(conversationKey, workspaceKey, modelReference);
+  }
+
+  getEffectiveModel(conversationKey: string, workspaceKey: string): ModelSummary | undefined {
+    return this.sessionPool.getEffectiveModel(conversationKey, workspaceKey);
+  }
+
+  setWorkspaceThinkingLevel(workspaceKey: string, thinkingLevel: ThinkingLevel): void {
+    this.sessionPool.setWorkspaceThinkingLevel(workspaceKey, thinkingLevel);
+  }
+
+  setConversationThinkingLevel(conversationKey: string, workspaceKey: string, thinkingLevel: ThinkingLevel): void {
+    this.sessionPool.setConversationThinkingLevel(conversationKey, workspaceKey, thinkingLevel);
+  }
+
+  getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel {
+    return this.sessionPool.getEffectiveThinkingLevel(conversationKey, workspaceKey);
+  }
+
+  listLoginProviders(): LoginProviderOption[] {
+    return this.sessionPool.listLoginProviders();
+  }
+
+  setProviderApiKey(providerId: string, apiKey: string): void {
+    this.sessionPool.setProviderApiKey(providerId, apiKey);
+  }
+
+  startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
+    return this.sessionPool.startOpenAICodexLogin(userId);
+  }
+
+  completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void> {
+    return this.sessionPool.completeOpenAICodexLogin(userId, codeOrUrl);
   }
 
   listSkillSummaries(): SkillSummary[] {

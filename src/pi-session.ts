@@ -13,6 +13,7 @@ import {
   type SessionInfo,
   type Skill,
 } from "@mariozechner/pi-coding-agent";
+import { loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
 import path from "node:path";
 import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
 import { AccessApprovalManager } from "./access-approval.js";
@@ -24,6 +25,7 @@ import type {
   ModelSummary,
   PicordRuntimeConfig,
   SkillSummary,
+  ThinkingLevel,
   WorkspaceInfo,
   WorkspaceModelScopeResult,
 } from "./types.js";
@@ -32,6 +34,7 @@ import { WorkspaceRegistry, type ManagedWorkspaceSummary } from "./workspace-reg
 interface SessionHandle {
   session: AgentSession;
   workspaceKey: string;
+  conversationKey: string;
 }
 
 interface WorkspaceState {
@@ -42,6 +45,7 @@ interface WorkspaceState {
   skills: Skill[];
   modelScopePatterns: string[];
   selectedModel?: { provider: string; id: string };
+  selectedThinkingLevel?: ThinkingLevel;
 }
 
 function buildSystemPrompt(config: PicordRuntimeConfig): string {
@@ -79,14 +83,30 @@ function matchesPattern(reference: string, pattern: string): boolean {
   return patternToRegExp(pattern).test(reference);
 }
 
+function formatProviderName(providerId: string): string {
+  return providerId
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+interface PendingOAuthLogin {
+  complete: (input: string) => void;
+  promise: Promise<void>;
+}
+
 export class PiSessionPool {
   private readonly authStorage = AuthStorage.create();
   private readonly modelRegistry = ModelRegistry.create(this.authStorage);
   private readonly sessions = new Map<string, SessionHandle>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly workspaces = new Map<string, WorkspaceState>();
+  private readonly conversationModels = new Map<string, { provider: string; id: string }>();
+  private readonly conversationThinkingLevels = new Map<string, ThinkingLevel>();
   private readonly approvals: AccessApprovalManager;
   private readonly registry: WorkspaceRegistry;
+  private readonly pendingOAuthLogins = new Map<string, PendingOAuthLogin>();
 
   constructor(
     private readonly config: PicordRuntimeConfig,
@@ -110,6 +130,101 @@ export class PiSessionPool {
 
   getSessionCount(): number {
     return this.sessions.size;
+  }
+
+  listLoginProviders(): Array<{ id: string; name: string; method: "api-key" | "oauth"; hasStoredAuth: boolean }> {
+    const oauthProviders = this.authStorage.getOAuthProviders();
+    const oauthIds = new Set(oauthProviders.map((provider) => provider.id));
+    const configuredProviders = new Set(this.authStorage.list());
+    const providerOptions = new Map<string, { id: string; name: string; method: "api-key" | "oauth"; hasStoredAuth: boolean }>();
+
+    for (const provider of oauthProviders) {
+      providerOptions.set(provider.id, {
+        id: provider.id,
+        name: provider.name,
+        method: "oauth",
+        hasStoredAuth: configuredProviders.has(provider.id),
+      });
+    }
+
+    for (const model of this.getAvailableModels()) {
+      if (oauthIds.has(model.provider)) continue;
+      providerOptions.set(model.provider, {
+        id: model.provider,
+        name: formatProviderName(model.provider),
+        method: "api-key",
+        hasStoredAuth: configuredProviders.has(model.provider),
+      });
+    }
+
+    return [...providerOptions.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  setProviderApiKey(providerId: string, apiKey: string): void {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      throw new Error("API key cannot be empty.");
+    }
+    this.authStorage.set(providerId, { type: "api_key", key: trimmed });
+  }
+
+  async startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
+    if (this.pendingOAuthLogins.has(userId)) {
+      throw new Error("A login is already in progress. Finish it with /login-complete.");
+    }
+
+    let authUrl: string | undefined;
+    let authInstructions: string | undefined;
+    let resolveCodeInput: ((input: string) => void) | undefined;
+
+    const loginPromise = this.authStorage.login("openai-codex", {
+      onAuth: ({ url, instructions }) => {
+        authUrl = url;
+        authInstructions = instructions;
+      },
+      onPrompt: async ({ message }) => {
+        return await new Promise<string>((resolve) => {
+          resolveCodeInput = resolve;
+        });
+      },
+      onManualCodeInput: async () => {
+        return await new Promise<string>((resolve) => {
+          resolveCodeInput = resolve;
+        });
+      },
+      onProgress: () => undefined,
+    }).then(() => undefined).finally(() => {
+      this.pendingOAuthLogins.delete(userId);
+    });
+
+    this.pendingOAuthLogins.set(userId, {
+      complete: (input: string) => {
+        if (!resolveCodeInput) {
+          throw new Error("Login is not ready for code input yet. Try again in a moment.");
+        }
+        resolveCodeInput(input);
+      },
+      promise: loginPromise,
+    });
+
+    for (let i = 0; i < 50; i += 1) {
+      if (authUrl) {
+        return { url: authUrl, instructions: authInstructions };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    this.pendingOAuthLogins.delete(userId);
+    throw new Error("OpenAI Codex login could not be started.");
+  }
+
+  async completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void> {
+    const pending = this.pendingOAuthLogins.get(userId);
+    if (!pending) {
+      throw new Error("No OpenAI Codex login is in progress. Run /login first.");
+    }
+    pending.complete(codeOrUrl);
+    await pending.promise;
   }
 
   getSkillSummaries(): SkillSummary[] {
@@ -180,6 +295,30 @@ export class PiSessionPool {
         name: session.name,
         modified: session.modified,
         messageCount: session.messageCount,
+      }));
+  }
+
+  async listAllSessions(limit: number = 25): Promise<Array<{
+    id: string;
+    path: string;
+    cwd: string;
+    name?: string;
+    modified: Date;
+    messageCount: number;
+    projectName: string;
+  }>> {
+    const allSessions = await SessionManager.listAll();
+    return allSessions
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime())
+      .slice(0, limit)
+      .map((session) => ({
+        id: session.id,
+        path: session.path,
+        cwd: session.cwd,
+        name: session.name,
+        modified: session.modified,
+        messageCount: session.messageCount,
+        projectName: path.basename(session.cwd),
       }));
   }
 
@@ -353,31 +492,80 @@ export class PiSessionPool {
   }
 
   async setWorkspaceModel(workspaceKey: string, modelReference: string): Promise<ModelSummary> {
-    const [provider, ...rest] = modelReference.split("/");
-    const id = rest.join("/").trim();
-    if (!provider || !id) {
-      throw new Error("Model reference must look like provider/model-id.");
-    }
-
-    const model = this.modelRegistry.find(provider, id);
-    if (!model) {
-      throw new Error(`Model not found: ${modelReference}`);
-    }
-
-    if (!this.modelRegistry.hasConfiguredAuth(model)) {
-      throw new Error(`Model is not configured for auth: ${modelReference}`);
-    }
-
+    const model = this.resolveConfiguredModel(modelReference);
     const state = this.ensureWorkspaceStateSync(workspaceKey);
     state.selectedModel = { provider: model.provider, id: model.id };
 
     for (const handle of this.sessions.values()) {
-      if (handle.workspaceKey === workspaceKey) {
+      if (handle.workspaceKey === workspaceKey && !this.conversationModels.has(handle.conversationKey)) {
         await handle.session.setModel(model);
       }
     }
 
     return { provider: model.provider, id: model.id, name: model.name };
+  }
+
+  async setConversationModel(
+    conversationKey: string,
+    workspaceKey: string,
+    modelReference: string,
+  ): Promise<ModelSummary> {
+    const model = this.resolveConfiguredModel(modelReference);
+    await this.ensureWorkspaceLoaded(workspaceKey);
+    this.conversationModels.set(conversationKey, { provider: model.provider, id: model.id });
+
+    const handle = this.sessions.get(conversationKey);
+    if (handle) {
+      await handle.session.setModel(model);
+    }
+
+    return { provider: model.provider, id: model.id, name: model.name };
+  }
+
+  getEffectiveModel(conversationKey: string, workspaceKey: string): ModelSummary | undefined {
+    const conversationModel = this.conversationModels.get(conversationKey);
+    if (conversationModel) {
+      const model = this.modelRegistry.find(conversationModel.provider, conversationModel.id);
+      if (model) {
+        return { provider: model.provider, id: model.id, name: model.name };
+      }
+    }
+
+    const workspaceModel = this.ensureWorkspaceStateSync(workspaceKey).selectedModel;
+    if (!workspaceModel) {
+      return undefined;
+    }
+
+    const model = this.modelRegistry.find(workspaceModel.provider, workspaceModel.id);
+    return model
+      ? { provider: model.provider, id: model.id, name: model.name }
+      : undefined;
+  }
+
+  setWorkspaceThinkingLevel(workspaceKey: string, thinkingLevel: ThinkingLevel): void {
+    const state = this.ensureWorkspaceStateSync(workspaceKey);
+    state.selectedThinkingLevel = thinkingLevel;
+
+    for (const handle of this.sessions.values()) {
+      if (handle.workspaceKey === workspaceKey && !this.conversationThinkingLevels.has(handle.conversationKey)) {
+        handle.session.setThinkingLevel(thinkingLevel);
+      }
+    }
+  }
+
+  setConversationThinkingLevel(conversationKey: string, workspaceKey: string, thinkingLevel: ThinkingLevel): void {
+    this.ensureWorkspaceStateSync(workspaceKey);
+    this.conversationThinkingLevels.set(conversationKey, thinkingLevel);
+    const handle = this.sessions.get(conversationKey);
+    if (handle) {
+      handle.session.setThinkingLevel(thinkingLevel);
+    }
+  }
+
+  getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel {
+    return this.conversationThinkingLevels.get(conversationKey)
+      ?? this.ensureWorkspaceStateSync(workspaceKey).selectedThinkingLevel
+      ?? this.config.thinkingLevel;
   }
 
   getBlockedPathPatterns(): string[] {
@@ -434,6 +622,7 @@ export class PiSessionPool {
         ...reusable,
         modelScopePatterns: [],
         selectedModel: reusable.selectedModel,
+        selectedThinkingLevel: reusable.selectedThinkingLevel,
       };
       this.workspaces.set(workspaceKey, state);
       return state;
@@ -477,6 +666,7 @@ export class PiSessionPool {
       selectedModel: this.config.modelProvider && this.config.modelId
         ? { provider: this.config.modelProvider, id: this.config.modelId }
         : undefined,
+      selectedThinkingLevel: this.config.thinkingLevel,
     };
 
     if (workspaceKey) {
@@ -498,8 +688,9 @@ export class PiSessionPool {
     if (existing) return existing;
 
     const workspaceState = await this.ensureWorkspaceLoaded(options.workspaceKey);
-    const model = workspaceState.selectedModel
-      ? this.modelRegistry.find(workspaceState.selectedModel.provider, workspaceState.selectedModel.id)
+    const selectedModel = this.conversationModels.get(options.conversationKey) ?? workspaceState.selectedModel;
+    const model = selectedModel
+      ? this.modelRegistry.find(selectedModel.provider, selectedModel.id)
       : undefined;
 
     const accessContext: AccessContext = {
@@ -531,7 +722,7 @@ export class PiSessionPool {
     const { session } = await createAgentSession({
       cwd: workspaceState.cwd,
       model,
-      thinkingLevel: this.config.thinkingLevel,
+      thinkingLevel: this.getEffectiveThinkingLevel(options.conversationKey, options.workspaceKey),
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       resourceLoader: workspaceState.resourceLoader,
@@ -544,11 +735,15 @@ export class PiSessionPool {
 
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
     if (!hasExistingSession) {
-      await session.newSession({
-        setup: async (innerSessionManager) => {
-          innerSessionManager.appendSessionInfo(options.sessionName);
-        },
-      });
+      if (typeof session.newSession === "function") {
+        await session.newSession({
+          setup: async (innerSessionManager) => {
+            innerSessionManager.appendSessionInfo(options.sessionName);
+          },
+        });
+      } else {
+        session.sessionManager.appendSessionInfo(options.sessionName);
+      }
     }
 
     const persistedSessionFile = session.sessionManager.getSessionFile();
@@ -559,6 +754,7 @@ export class PiSessionPool {
     const handle = {
       session,
       workspaceKey: options.workspaceKey,
+      conversationKey: options.conversationKey,
     } satisfies SessionHandle;
     this.sessions.set(options.conversationKey, handle);
     return handle;
@@ -567,6 +763,25 @@ export class PiSessionPool {
   private async syncSessionName(session: AgentSession, sessionName: string): Promise<void> {
     if (session.sessionName === sessionName) return;
     session.sessionManager.appendSessionInfo(sessionName);
+  }
+
+  private resolveConfiguredModel(modelReference: string) {
+    const [provider, ...rest] = modelReference.split("/");
+    const id = rest.join("/").trim();
+    if (!provider || !id) {
+      throw new Error("Model reference must look like provider/model-id.");
+    }
+
+    const model = this.modelRegistry.find(provider, id);
+    if (!model) {
+      throw new Error(`Model not found: ${modelReference}`);
+    }
+
+    if (!this.modelRegistry.hasConfiguredAuth(model)) {
+      throw new Error(`Model is not configured for auth: ${modelReference}`);
+    }
+
+    return model;
   }
 
   private async resolveSessionReference(sessionReference: string): Promise<SessionInfo> {

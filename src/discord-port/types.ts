@@ -1,11 +1,18 @@
 import type { Guild, Message, ThreadChannel } from "discord.js";
 import type { AccessRequest, ApprovalDecisionMode } from "../access-approval.js";
-import type { ModelSummary, PicordRuntimeConfig, SkillSummary, WorkspaceInfo, WorkspaceModelScopeResult } from "../types.js";
+import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel, WorkspaceInfo, WorkspaceModelScopeResult } from "../types.js";
 
 export interface ManagedProjectRecord {
   channelId: string;
   root: string;
   name?: string;
+}
+
+export interface LoginProviderOption {
+  id: string;
+  name: string;
+  method: "api-key" | "oauth";
+  hasStoredAuth: boolean;
 }
 
 export interface PiBoundSessionSummary {
@@ -22,6 +29,10 @@ export interface PiAvailableSessionSummary {
   name?: string;
   modified: Date;
   messageCount: number;
+}
+
+export interface PiGlobalSessionSummary extends PiAvailableSessionSummary {
+  projectName: string;
 }
 
 export interface DiscordPortProjectCreationResult {
@@ -47,9 +58,19 @@ export interface DiscordPortRuntimeAdapter {
   getWorkspaceInfo(workspaceKey: string): WorkspaceInfo;
   getBlockedPathPatterns(): string[];
   listSessionsForWorkspace(workspaceKey: string, limit?: number): Promise<PiAvailableSessionSummary[]>;
+  listAllSessions(limit?: number): Promise<PiGlobalSessionSummary[]>;
   setWorkspaceModelScope(workspaceKey: string, rawPatterns: string): WorkspaceModelScopeResult;
   clearWorkspaceModelScope(workspaceKey: string): WorkspaceModelScopeResult;
   setWorkspaceModel(workspaceKey: string, modelReference: string): Promise<ModelSummary>;
+  setConversationModel(conversationKey: string, workspaceKey: string, modelReference: string): Promise<ModelSummary>;
+  getEffectiveModel(conversationKey: string, workspaceKey: string): ModelSummary | undefined;
+  setWorkspaceThinkingLevel(workspaceKey: string, thinkingLevel: ThinkingLevel): void;
+  setConversationThinkingLevel(conversationKey: string, workspaceKey: string, thinkingLevel: ThinkingLevel): void;
+  getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel;
+  listLoginProviders(): LoginProviderOption[];
+  setProviderApiKey(providerId: string, apiKey: string): void;
+  startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }>;
+  completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void>;
   respond(options: {
     conversationKey: string;
     workspaceKey: string;

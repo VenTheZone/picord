@@ -1,4 +1,5 @@
 import { ChannelType, type Client, type Guild, type Message, type TextChannel, type ThreadChannel, type User } from "discord.js";
+import fs from "node:fs";
 import path from "node:path";
 import { buildPromptFromMessage } from "./message-helpers.js";
 import type { ModelSummary } from "../types.js";
@@ -10,6 +11,38 @@ export class DiscordPortRuntime {
     readonly client: Client,
     readonly adapter: DiscordPortRuntimeAdapter,
   ) {}
+
+  listAvailableProjects(limit?: number): Array<{
+    name: string;
+    root: string;
+    managed: boolean;
+    channelId?: string;
+  }> {
+    const basePath = this.getProjectsDir();
+    if (!fs.existsSync(basePath)) {
+      return [];
+    }
+
+    const managedByRoot = new Map(
+      this.adapter.listManagedProjects().map((project) => [path.resolve(project.root), project]),
+    );
+
+    const entries = fs.readdirSync(basePath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const root = path.join(basePath, entry.name);
+        const managed = managedByRoot.get(path.resolve(root));
+        return {
+          name: entry.name,
+          root,
+          managed: Boolean(managed),
+          channelId: managed?.channelId,
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return typeof limit === "number" ? entries.slice(0, limit) : entries;
+  }
 
   getProjectsDir(): string {
     return this.adapter.config.workspaceBasePath;
@@ -157,6 +190,9 @@ export class DiscordPortRuntime {
     const workspaceScope = this.adapter.getWorkspaceModelScope(workspaceKey);
     const boundSession = this.adapter.getBoundSessionSummary(conversationKey);
 
+    const effectiveModel = this.adapter.getEffectiveModel(conversationKey, workspaceKey);
+    const effectiveThinkingLevel = this.adapter.getEffectiveThinkingLevel(conversationKey, workspaceKey);
+
     return [
       "discord-port runtime status",
       `runtimeArch: discord-port`,
@@ -171,6 +207,8 @@ export class DiscordPortRuntime {
       boundSession?.path ? `boundSessionPath: ${boundSession.path}` : undefined,
       `managedProjectChannel: ${managedProjectChannel}`,
       `activeSessions: ${this.adapter.getSessionCount()}`,
+      effectiveModel ? `activeModel: ${effectiveModel.provider}/${effectiveModel.id}` : undefined,
+      `activeThinkingLevel: ${effectiveThinkingLevel}`,
       `workspaceScopedModels: ${workspaceScope.models.length}`,
       `workspaceScopePatterns: ${workspaceScope.patterns.join(", ") || "(none)"}`,
       `blockedPathPatterns: ${this.adapter.getBlockedPathPatterns().join(", ") || "(none)"}`,
@@ -428,6 +466,38 @@ export class DiscordPortRuntime {
       const name = workspace.name ? ` (${workspace.name})` : "";
       return `${mention}${name} → ${workspace.root}`;
     }).join("\n");
+  }
+
+  async describeAvailableProjects(limit: number = 50): Promise<string> {
+    const basePath = this.getProjectsDir();
+    if (!fs.existsSync(basePath)) {
+      return `Workspace base path does not exist: ${basePath}`;
+    }
+
+    const allEntries = this.listAvailableProjects();
+    if (allEntries.length === 0) {
+      return `No direct subfolders found under ${basePath}`;
+    }
+
+    const visibleEntries = allEntries.slice(0, limit);
+    const lines = [
+      `Available projects under ${basePath}`,
+      "",
+      ...visibleEntries.flatMap((entry) => [
+        `- ${entry.name}`,
+        `  path: ${entry.root}`,
+        entry.managed
+          ? `  status: already mapped -> <#${entry.channelId}>`
+          : "  status: not mapped",
+        "",
+      ]),
+    ];
+
+    if (allEntries.length > visibleEntries.length) {
+      lines.push(`Showing ${visibleEntries.length} of ${allEntries.length} folders.`);
+    }
+
+    return lines.join("\n").trim();
   }
 
   projectNameForSessionCwd(cwd: string): string {
