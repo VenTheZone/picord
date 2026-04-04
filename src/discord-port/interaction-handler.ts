@@ -363,10 +363,11 @@ export function registerDiscordPortInteractionHandler({
 
           await interaction.update({
             content: [
-              `OpenAI Codex login started for **${provider.name}**.`,
-              "Open the login link on another device/browser and complete sign-in.",
-              `Auth URL: ${started.url}`,
-              started.instructions ?? "After login, paste the resulting code or full redirect URL.",
+              `OpenAI Codex device login started for **${provider.name}**.`,
+              `Open this verification page on another device/browser: ${started.url}`,
+              started.instructions ?? "Enter the one-time code shown by OpenAI.",
+              "Picord is polling automatically in the background.",
+              "Use the button below only if OpenAI falls back to manual browser completion and asks you to paste a code or redirect URL.",
             ].join("\n\n"),
             components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button)],
           });

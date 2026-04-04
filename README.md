@@ -293,6 +293,8 @@ These must be run in the configured host control channel.
 - `/reload`
 - `/login`
 - `/project-create name:<project-name>`
+
+`/login` opens a provider picker. API-key providers prompt for a replacement key in Discord. `openai-codex` prefers the headless device flow: picord shows the OpenAI verification URL plus the one-time code and then polls for completion automatically.
 - `/add-project`
 - `/add-project-path path:<path> mode:<new-channel|current-channel> name:<optional>`
 - `/project-list`
@@ -353,5 +355,5 @@ tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && se
 
 - Full guild message flow depends on **Message Content Intent** being enabled on the Discord app
 - DMs and unmapped channels still fall back to the configured default `cwd`
-- OpenAI Codex login in picord currently uses a Discord-guided manual completion flow rather than a native one-time device-code screen
+- OpenAI Codex login prefers the native headless device flow and polls automatically after you enter the one-time code on OpenAI's verification page; the manual paste flow remains only as a fallback if OpenAI falls back to browser completion
 - Bash safety is path-based and conservative; direct tool access is guarded more strictly than arbitrary shell behavior

@@ -170,7 +170,7 @@ export class PiSessionPool {
 
   async startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
     if (this.pendingOAuthLogins.has(userId)) {
-      throw new Error("A login is already in progress. Finish it with /login-complete.");
+      throw new Error("An OpenAI Codex login is already in progress.");
     }
 
     let authUrl: string | undefined;
@@ -183,6 +183,9 @@ export class PiSessionPool {
         authInstructions = instructions;
       },
       onPrompt: async ({ message }) => {
+        if (message.toLowerCase().includes("login method")) {
+          return "headless";
+        }
         return await new Promise<string>((resolve) => {
           resolveCodeInput = resolve;
         });
@@ -200,7 +203,7 @@ export class PiSessionPool {
     this.pendingOAuthLogins.set(userId, {
       complete: (input: string) => {
         if (!resolveCodeInput) {
-          throw new Error("Login is not ready for code input yet. Try again in a moment.");
+          throw new Error("Manual code input is not currently needed for this login.");
         }
         resolveCodeInput(input);
       },
