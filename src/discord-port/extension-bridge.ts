@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ChannelType, Events, type Client, type Guild } from "discord.js";
 import { loadRuntimeConfig } from "../config.js";
+import { type LiveDiscordRunRenderer, type PiLiveUpdate } from "../live-discord-renderer.js";
 import { PiSessionPool } from "../pi-session.js";
 import { RuntimeLock } from "../runtime-lock.js";
 import { sendTextResponse } from "./message-helpers.js";
@@ -130,8 +131,15 @@ export async function startDiscordPortExtensionRuntime({
   }
 
   let client: Client | undefined;
+  const liveRenderers = new Map<string, LiveDiscordRunRenderer>();
 
-  const notifyConversation = async (conversationKey: string, content: string): Promise<void> => {
+  const notifyConversation = async (conversationKey: string, update: PiLiveUpdate): Promise<void> => {
+    const renderer = liveRenderers.get(conversationKey);
+    if (!renderer) return;
+    await renderer.onUpdate(update);
+  };
+
+  const sessionPool = new PiSessionPool(config, async (conversationKey, content) => {
     const channelId = getChannelIdFromConversationKey(conversationKey);
     if (!channelId || !client) {
       notify(`discord-port could not deliver conversation notice for ${conversationKey}`, "warning");
@@ -151,11 +159,9 @@ export async function startDiscordPortExtensionRuntime({
         "warning",
       );
     }
-  };
-
-  const sessionPool = new PiSessionPool(config, notifyConversation);
+  }, notifyConversation);
   await sessionPool.initialize();
-  const adapter = new PiSessionPoolAdapter(config, sessionPool);
+  const adapter = new PiSessionPoolAdapter(config, sessionPool, liveRenderers);
 
   let slashOnlyMode = false;
   let cleanedUp = false;

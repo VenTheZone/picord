@@ -1,4 +1,5 @@
 import type { ApprovalDecisionMode } from "../access-approval.js";
+import type { LiveDiscordRunRenderer } from "../live-discord-renderer.js";
 import type { PiSessionPool } from "../pi-session.js";
 import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel } from "../types.js";
 import type {
@@ -13,6 +14,7 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
   constructor(
     public readonly config: PicordRuntimeConfig,
     private readonly sessionPool: PiSessionPool,
+    private readonly liveRenderers: Map<string, LiveDiscordRunRenderer>,
   ) {}
 
   isOwner(userId: string): boolean {
@@ -118,6 +120,14 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
 
   completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void> {
     return this.sessionPool.completeOpenAICodexLogin(userId, codeOrUrl);
+  }
+
+  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer): void {
+    this.liveRenderers.set(conversationKey, renderer);
+  }
+
+  clearLiveRenderer(conversationKey: string): void {
+    this.liveRenderers.delete(conversationKey);
   }
 
   listSkillSummaries(): SkillSummary[] {

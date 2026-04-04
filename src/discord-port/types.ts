@@ -1,5 +1,6 @@
 import type { Guild, Message, ThreadChannel } from "discord.js";
 import type { AccessRequest, ApprovalDecisionMode } from "../access-approval.js";
+import type { LiveDiscordRunRenderer } from "../live-discord-renderer.js";
 import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel, WorkspaceInfo, WorkspaceModelScopeResult } from "../types.js";
 
 export interface ManagedProjectRecord {
@@ -71,6 +72,8 @@ export interface DiscordPortRuntimeAdapter {
   setProviderApiKey(providerId: string, apiKey: string): void;
   startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }>;
   completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void>;
+  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer): void;
+  clearLiveRenderer(conversationKey: string): void;
   respond(options: {
     conversationKey: string;
     workspaceKey: string;

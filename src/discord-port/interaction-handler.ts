@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
 import type { ApprovalDecisionMode } from "../access-approval.js";
+import { LiveDiscordRunRenderer, createInteractionLiveMessageTarget } from "../live-discord-renderer.js";
 import {
   buildEffectiveAccessConfig,
   extractMemberRoleIds,
@@ -886,13 +887,19 @@ export function registerDiscordPortInteractionHandler({
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const response = await runtime.adapter.respond({
-          conversationKey,
-          workspaceKey,
-          sessionName,
-          promptText: buildPromptFromInteraction(interaction, promptText),
-        });
-        await replyToInteraction(interaction, response);
+        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+        runtime.adapter.registerLiveRenderer(conversationKey, renderer);
+        try {
+          const response = await runtime.adapter.respond({
+            conversationKey,
+            workspaceKey,
+            sessionName,
+            promptText: buildPromptFromInteraction(interaction, promptText),
+          });
+          await renderer.finalize(response);
+        } finally {
+          runtime.adapter.clearLiveRenderer(conversationKey);
+        }
         return;
       }
 
@@ -1110,14 +1117,20 @@ export function registerDiscordPortInteractionHandler({
         const skillArgs = interaction.options.getString("prompt")?.trim();
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const response = await runtime.adapter.invokeSkill({
-          conversationKey,
-          workspaceKey,
-          sessionName,
-          skillName: skillCommand.name,
-          args: skillArgs,
-        });
-        await replyToInteraction(interaction, response);
+        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+        runtime.adapter.registerLiveRenderer(conversationKey, renderer);
+        try {
+          const response = await runtime.adapter.invokeSkill({
+            conversationKey,
+            workspaceKey,
+            sessionName,
+            skillName: skillCommand.name,
+            args: skillArgs,
+          });
+          await renderer.finalize(response);
+        } finally {
+          runtime.adapter.clearLiveRenderer(conversationKey);
+        }
         return;
       }
     } catch (error) {

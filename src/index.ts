@@ -19,6 +19,7 @@ import { canAccessDm, canAccessGuild } from "./auth.js";
 import { toDiscordChunks } from "./conversation.js";
 import { loadRuntimeConfig } from "./config.js";
 import discordPortExtension from "./discord-port/entrypoint.js";
+import { LiveDiscordRunRenderer, createChannelLiveMessageTarget, createInteractionLiveMessageTarget, type PiLiveUpdate } from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 import { RuntimeLock } from "./runtime-lock.js";
@@ -623,13 +624,20 @@ export default function picordExtension(pi: ExtensionAPI) {
   let sessionPool: PiSessionPool | undefined;
   let runtimeLock: RuntimeLock | undefined;
   let slashOnlyMode = false;
-  const conversationNotifiers = new Map<string, (content: string) => Promise<void>>();
+  const liveRenderers = new Map<string, LiveDiscordRunRenderer>();
+  const conversationNoticeTargets = new Map<string, (content: string) => Promise<void>>();
   const hostControlChannels = new Map<string, string>();
 
-  async function notifyConversation(conversationKey: string, content: string): Promise<void> {
-    const notifier = conversationNotifiers.get(conversationKey);
-    if (!notifier) return;
-    await notifier(content);
+  async function notifyConversation(conversationKey: string, update: PiLiveUpdate): Promise<void> {
+    const renderer = liveRenderers.get(conversationKey);
+    if (!renderer) return;
+    await renderer.onUpdate(update);
+  }
+
+  async function notifyAccessRequest(conversationKey: string, content: string): Promise<void> {
+    const target = conversationNoticeTargets.get(conversationKey);
+    if (!target) return;
+    await target(content);
   }
 
   async function resolveHostControlChannelId(guild: Guild): Promise<string | undefined> {
@@ -736,7 +744,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
 
       const conversationKey = getConversationKeyFromMessage(message);
-      conversationNotifiers.set(conversationKey, async (content) => {
+      const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
+      liveRenderers.set(conversationKey, renderer);
+      conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
           await sendTextResponse(message.channel, content);
         }
@@ -749,9 +759,10 @@ export default function picordExtension(pi: ExtensionAPI) {
           sessionName: getSessionNameFromMessage(message),
           promptText: buildPromptFromMessage(message, promptText),
         });
-        await replyToMessage(message, response);
+        await renderer.finalize(response);
       } finally {
-        conversationNotifiers.delete(conversationKey);
+        liveRenderers.delete(conversationKey);
+        conversationNoticeTargets.delete(conversationKey);
       }
       return;
     }
@@ -766,7 +777,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
 
       const conversationKey = getConversationKeyFromMessage(message);
-      conversationNotifiers.set(conversationKey, async (content) => {
+      const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
+      liveRenderers.set(conversationKey, renderer);
+      conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
           await sendTextResponse(message.channel, content);
         }
@@ -779,9 +792,10 @@ export default function picordExtension(pi: ExtensionAPI) {
           sessionName: getSessionNameFromMessage(message),
           promptText: buildPromptFromMessage(message, promptText),
         });
-        await replyToMessage(message, response);
+        await renderer.finalize(response);
       } finally {
-        conversationNotifiers.delete(conversationKey);
+        liveRenderers.delete(conversationKey);
+        conversationNoticeTargets.delete(conversationKey);
       }
       return;
     }
@@ -805,7 +819,9 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     const conversationKey = `discord:guild:${message.guildId!}:thread:${thread.id}`;
     const workspaceKey = getWorkspaceKeyFromMessage(message);
-    conversationNotifiers.set(conversationKey, async (content) => {
+    const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
+    liveRenderers.set(conversationKey, renderer);
+    conversationNoticeTargets.set(conversationKey, async (content) => {
       await sendTextResponse(thread, content);
     });
 
@@ -816,9 +832,10 @@ export default function picordExtension(pi: ExtensionAPI) {
         sessionName: thread.name,
         promptText: buildPromptFromMessage(message, promptText),
       });
-      await sendTextResponse(thread, response);
+      await renderer.finalize(response);
     } finally {
-      conversationNotifiers.delete(conversationKey);
+      liveRenderers.delete(conversationKey);
+      conversationNoticeTargets.delete(conversationKey);
     }
   }
 
@@ -1110,8 +1127,10 @@ export default function picordExtension(pi: ExtensionAPI) {
       return;
     }
 
-    const channel = interaction.channel;
-    conversationNotifiers.set(conversationKey, async (content) => {
+    const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+    liveRenderers.set(conversationKey, renderer);
+    conversationNoticeTargets.set(conversationKey, async (content) => {
+      const channel = interaction.channel;
       if (channel && "send" in channel) {
         await sendTextResponse(channel, content);
       }
@@ -1133,7 +1152,7 @@ export default function picordExtension(pi: ExtensionAPI) {
           sessionName,
           promptText: buildPromptFromInteraction(interaction, promptText),
         });
-        await replyToInteraction(interaction, response);
+        await renderer.finalize(response);
         return;
       }
 
@@ -1146,10 +1165,11 @@ export default function picordExtension(pi: ExtensionAPI) {
           skillName: skillCommand.name,
           args: skillArgs,
         });
-        await replyToInteraction(interaction, response);
+        await renderer.finalize(response);
       }
     } finally {
-      conversationNotifiers.delete(conversationKey);
+      liveRenderers.delete(conversationKey);
+      conversationNoticeTargets.delete(conversationKey);
     }
   }
 
@@ -1250,7 +1270,7 @@ export default function picordExtension(pi: ExtensionAPI) {
     });
 
     try {
-      sessionPool = new PiSessionPool(runtimeConfig, notifyConversation);
+      sessionPool = new PiSessionPool(runtimeConfig, notifyAccessRequest, notifyConversation);
       await sessionPool.initialize();
 
       client = createDiscordClient(true);
@@ -1287,6 +1307,7 @@ export default function picordExtension(pi: ExtensionAPI) {
         sessionPool = undefined;
       }
       hostControlChannels.clear();
+      conversationNoticeTargets.clear();
       if (runtimeLock) {
         runtimeLock.release();
         runtimeLock = undefined;
@@ -1307,7 +1328,8 @@ export default function picordExtension(pi: ExtensionAPI) {
       sessionPool = undefined;
     }
 
-    conversationNotifiers.clear();
+    liveRenderers.clear();
+    conversationNoticeTargets.clear();
     hostControlChannels.clear();
     if (runtimeLock) {
       runtimeLock.release();

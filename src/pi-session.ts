@@ -16,6 +16,7 @@ import {
 import { loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
 import path from "node:path";
 import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
+import type { PiLiveUpdate } from "./live-discord-renderer.js";
 import { AccessApprovalManager } from "./access-approval.js";
 import type { AccessContext } from "./path-policy.js";
 import { WorkspaceGuard } from "./path-policy.js";
@@ -107,13 +108,16 @@ export class PiSessionPool {
   private readonly approvals: AccessApprovalManager;
   private readonly registry: WorkspaceRegistry;
   private readonly pendingOAuthLogins = new Map<string, PendingOAuthLogin>();
+  private readonly notifyLiveUpdate?: (conversationKey: string, update: PiLiveUpdate) => Promise<void>;
 
   constructor(
     private readonly config: PicordRuntimeConfig,
     notifyAccessRequest: (conversationKey: string, content: string) => Promise<void>,
+    notifyLiveUpdate?: (conversationKey: string, update: PiLiveUpdate) => Promise<void>,
   ) {
     this.approvals = new AccessApprovalManager(config.ownerUserId, notifyAccessRequest);
     this.registry = new WorkspaceRegistry(config.statePath);
+    this.notifyLiveUpdate = notifyLiveUpdate;
   }
 
   async initialize(): Promise<void> {
@@ -378,14 +382,47 @@ export class PiSessionPool {
         : undefined;
 
       const chunks: string[] = [];
+      let notifyQueue = Promise.resolve();
+      const enqueueUpdate = (update: PiLiveUpdate) => {
+        if (!this.notifyLiveUpdate) return;
+        notifyQueue = notifyQueue
+          .then(() => this.notifyLiveUpdate?.(options.conversationKey, update))
+          .catch((error) => {
+            console.error("Failed to deliver live update:", error);
+          });
+      };
+
       const unsubscribe = handle.session.subscribe((event) => {
         if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-          chunks.push(event.assistantMessageEvent.delta);
+          const delta = event.assistantMessageEvent.delta;
+          chunks.push(delta);
+          enqueueUpdate({ type: "assistant_delta", delta });
+          return;
+        }
+
+        if (event.type === "tool_execution_start") {
+          enqueueUpdate({
+            type: "tool_start",
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args,
+          });
+          return;
+        }
+
+        if (event.type === "tool_execution_end") {
+          enqueueUpdate({
+            type: "tool_end",
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            isError: event.isError,
+          });
         }
       });
 
       try {
         await handle.session.prompt(options.promptText);
+        await notifyQueue;
       } finally {
         unsubscribe();
       }
