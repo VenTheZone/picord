@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildToolPanelContent, chunkDiscordMarkdown, formatToolCall, normalizeDiscordText } from "./live-discord-renderer.js";
+import { buildToolPanelEmbed, chunkDiscordMarkdown, formatToolCall, normalizeDiscordText } from "./live-discord-renderer.js";
 
 describe("live discord renderer helpers", () => {
   it("normalizes markdown headings and bullets outside code blocks", () => {
@@ -28,15 +28,16 @@ describe("live discord renderer helpers", () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 
-  it("builds plain tool activity content", () => {
-    const content = buildToolPanelContent([
+  it("builds a tool container without a tools-used label", () => {
+    const embed = buildToolPanelEmbed([
       { callId: "1", line: "`read` \"src/index.ts\"", status: "done" },
       { callId: "2", line: "`edit` \"src/live-discord-renderer.ts\"", status: "running" },
-    ], false);
+    ], false).toJSON();
 
-    expect(content).toContain("Using tools");
-    expect(content).toContain("✅ `read`");
-    expect(content).toContain("🟡 `edit`");
-    expect(content).toContain("running");
+    expect(embed.title).toBeUndefined();
+    expect(embed.description).toContain("✅ `read`");
+    expect(embed.description).toContain("🟡 `edit`");
+    expect(embed.description).not.toContain("Tools used");
+    expect(embed.footer?.text).toContain("running");
   });
 });

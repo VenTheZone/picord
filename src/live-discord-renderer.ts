@@ -6,6 +6,9 @@ const ASSISTANT_FLUSH_INTERVAL_MS = 100;
 const MAX_TOOL_LINES = 12;
 const MAX_FINAL_TOOL_LINES = 6;
 const RESPONSE_PLACEHOLDER = "_thinking…_";
+const TOOL_EMBED_COLOR_RUNNING = 0xf59e0b;
+const TOOL_EMBED_COLOR_SUCCESS = 0x22c55e;
+const TOOL_EMBED_COLOR_FAILED = 0xef4444;
 
 export type PiLiveUpdate =
   | { type: "assistant_delta"; delta: string }
@@ -144,22 +147,30 @@ function formatToolLine(entry: ToolEntry): string {
   return `${statusIcon} ${entry.line}`;
 }
 
-export function buildToolPanelContent(entries: ToolEntry[], finalized: boolean): string {
+function getToolEmbedColor(entries: ToolEntry[], finalized: boolean): number {
+  if (entries.some((entry) => entry.status === "failed")) return TOOL_EMBED_COLOR_FAILED;
+  if (finalized) return TOOL_EMBED_COLOR_SUCCESS;
+  return TOOL_EMBED_COLOR_RUNNING;
+}
+
+export function buildToolPanelEmbed(entries: ToolEntry[], finalized: boolean): EmbedBuilder {
   const maxLines = finalized ? MAX_FINAL_TOOL_LINES : MAX_TOOL_LINES;
   const visibleEntries = entries.slice(-maxLines).map(formatToolLine);
   const runningCount = entries.filter((entry) => entry.status === "running").length;
   const failedCount = entries.filter((entry) => entry.status === "failed").length;
 
-  const header = finalized ? `**Tools used · ${entries.length}**` : `**Using tools · ${entries.length}**`;
-  const status = finalized
+  const footer = finalized
     ? failedCount > 0
-      ? `_Completed with ${failedCount} failed_`
-      : "_Completed_"
+      ? `${failedCount} failed`
+      : "completed"
     : runningCount > 0
-      ? `_${runningCount} running_`
-      : "_Queued_";
+      ? `${runningCount} running`
+      : "queued";
 
-  return [header, status, ...visibleEntries].join("\n");
+  return new EmbedBuilder()
+    .setColor(getToolEmbedColor(entries, finalized))
+    .setDescription(visibleEntries.join("\n"))
+    .setFooter({ text: footer });
 }
 
 async function createChannelHandle(
@@ -336,7 +347,7 @@ export class LiveDiscordRunRenderer {
   private async flushToolPanel(): Promise<void> {
     if (this.tools.length === 0) return;
 
-    const payload: LiveMessagePayload = { content: buildToolPanelContent(this.tools, this.finalized) };
+    const payload: LiveMessagePayload = { embeds: [buildToolPanelEmbed(this.tools, this.finalized)] };
     this.toolFlushPromise = this.toolFlushPromise.then(async () => {
       if (!this.toolHandle) {
         this.toolHandle = await this.target.createFollowUp(payload);

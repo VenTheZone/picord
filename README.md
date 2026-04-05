@@ -135,30 +135,39 @@ pi -e ./src/index.ts --no-session
 
 For a stable VPS/runtime setup, run picord in its own tmux session from the local repo source.
 
-Start it:
+Recommended workflow:
 
 ```bash
 cd /path/to/picord
-set -a && source .env && set +a
-npm run sync:discord-commands
-
-tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+npm run picord:start
 ```
 
-Useful tmux commands:
+Useful runtime commands:
 
 ```bash
-# attach to the running session
-tmux attach -t picord
+# show tmux + systemd state
+npm run picord:status
+
+# show recent tmux output
+npm run picord:logs
+
+# restart after code changes
+npm run picord:restart
 
 # stop picord
-tmux kill-session -t picord
+npm run picord:stop
+```
 
-# restart picord after code changes
-tmux kill-session -t picord 2>/dev/null || true
-npm run build
-npm run sync:discord-commands
-tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+The wrapper script keeps startup consistent by:
+- requiring `.env`
+- running `npm run sync:discord-commands`
+- stopping the `picord` systemd service first if it is active
+- recreating the tmux session cleanly
+
+If you want to inspect the live tmux session directly:
+
+```bash
+tmux attach -t picord
 ```
 
 This is the recommended way to keep picord running on a remote machine while still using the live local source tree.
