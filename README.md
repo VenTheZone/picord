@@ -340,16 +340,22 @@ npm run smoke:discord:legacy
 npm run sync:discord-commands
 ```
 
-If you are running picord from the local source tree in tmux on a VPS, the usual update cycle is:
+If you are running picord from the local source tree in tmux on a VPS, use the runtime wrapper script for a consistent state:
 
 ```bash
 cd /path/to/picord
-npm run build
-npm run sync:discord-commands
-
-tmux kill-session -t picord 2>/dev/null || true
-tmux new-session -d -s picord 'cd /path/to/picord && set -a && source .env && set +a && exec pi -e ./src/index.ts --no-session'
+npm run picord:start
+npm run picord:status
+npm run picord:logs
+npm run picord:restart
+npm run picord:stop
 ```
+
+The wrapper script:
+- requires `.env`
+- runs `npm run sync:discord-commands` on start
+- stops the `picord` systemd service if it is active so you do not run duplicate bot processes
+- recreates the tmux session cleanly
 
 ## Current limitations
 

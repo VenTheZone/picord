@@ -5,10 +5,7 @@ const TOOL_FLUSH_INTERVAL_MS = 75;
 const ASSISTANT_FLUSH_INTERVAL_MS = 100;
 const MAX_TOOL_LINES = 12;
 const MAX_FINAL_TOOL_LINES = 6;
-const RESPONSE_PLACEHOLDER = "🤖 **Response**\n_thinking…_";
-const TOOL_EMBED_COLOR_RUNNING = 0xf59e0b;
-const TOOL_EMBED_COLOR_SUCCESS = 0x22c55e;
-const TOOL_EMBED_COLOR_FAILED = 0xef4444;
+const RESPONSE_PLACEHOLDER = "_thinking…_";
 
 export type PiLiveUpdate =
   | { type: "assistant_delta"; delta: string }
@@ -147,32 +144,22 @@ function formatToolLine(entry: ToolEntry): string {
   return `${statusIcon} ${entry.line}`;
 }
 
-function getToolEmbedColor(entries: ToolEntry[], finalized: boolean): number {
-  if (entries.some((entry) => entry.status === "failed")) return TOOL_EMBED_COLOR_FAILED;
-  if (finalized) return TOOL_EMBED_COLOR_SUCCESS;
-  return TOOL_EMBED_COLOR_RUNNING;
-}
-
-export function buildToolPanelEmbed(entries: ToolEntry[], finalized: boolean): EmbedBuilder {
+export function buildToolPanelContent(entries: ToolEntry[], finalized: boolean): string {
   const maxLines = finalized ? MAX_FINAL_TOOL_LINES : MAX_TOOL_LINES;
   const visibleEntries = entries.slice(-maxLines).map(formatToolLine);
   const runningCount = entries.filter((entry) => entry.status === "running").length;
   const failedCount = entries.filter((entry) => entry.status === "failed").length;
 
-  const title = finalized ? `🔧 Tools used · ${entries.length}` : `🔧 Using tools · ${entries.length}`;
-  const footer = finalized
+  const header = finalized ? `**Tools used · ${entries.length}**` : `**Using tools · ${entries.length}**`;
+  const status = finalized
     ? failedCount > 0
-      ? `${failedCount} failed`
-      : "completed"
+      ? `_Completed with ${failedCount} failed_`
+      : "_Completed_"
     : runningCount > 0
-      ? `${runningCount} running`
-      : "queued";
+      ? `_${runningCount} running_`
+      : "_Queued_";
 
-  return new EmbedBuilder()
-    .setColor(getToolEmbedColor(entries, finalized))
-    .setTitle(title)
-    .setDescription(visibleEntries.join("\n"))
-    .setFooter({ text: footer });
+  return [header, status, ...visibleEntries].join("\n");
 }
 
 async function createChannelHandle(
@@ -349,7 +336,7 @@ export class LiveDiscordRunRenderer {
   private async flushToolPanel(): Promise<void> {
     if (this.tools.length === 0) return;
 
-    const payload: LiveMessagePayload = { embeds: [buildToolPanelEmbed(this.tools, this.finalized)] };
+    const payload: LiveMessagePayload = { content: buildToolPanelContent(this.tools, this.finalized) };
     this.toolFlushPromise = this.toolFlushPromise.then(async () => {
       if (!this.toolHandle) {
         this.toolHandle = await this.target.createFollowUp(payload);
@@ -376,7 +363,7 @@ export class LiveDiscordRunRenderer {
     }
 
     const rendered = normalizeDiscordText(this.assistantChunks.join("") || "Done.");
-    const chunks = chunkDiscordMarkdown(`🤖 **Response**\n${rendered}`);
+    const chunks = chunkDiscordMarkdown(rendered);
 
     this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
       for (let index = 0; index < chunks.length; index++) {

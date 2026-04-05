@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildToolPanelEmbed, chunkDiscordMarkdown, formatToolCall, normalizeDiscordText } from "./live-discord-renderer.js";
+import { buildToolPanelContent, chunkDiscordMarkdown, formatToolCall, normalizeDiscordText } from "./live-discord-renderer.js";
 
 describe("live discord renderer helpers", () => {
   it("normalizes markdown headings and bullets outside code blocks", () => {
@@ -22,21 +22,21 @@ describe("live discord renderer helpers", () => {
     expect(formatToolCall("bash", { command: "npm test" })).toBe("`bash` \"npm test\"");
   });
 
-  it("keeps response headers when chunking long content", () => {
-    const chunks = chunkDiscordMarkdown("🤖 **Response**\n" + "hello ".repeat(1000), 200);
-    expect(chunks[0].startsWith("🤖 **Response**")).toBe(true);
+  it("chunks long assistant content without adding a response header", () => {
+    const chunks = chunkDiscordMarkdown("hello ".repeat(1000), 200);
+    expect(chunks[0]?.startsWith("🤖 **Response**")).toBe(false);
     expect(chunks.length).toBeGreaterThan(1);
   });
 
-  it("builds a richer embed for tool activity", () => {
-    const embed = buildToolPanelEmbed([
+  it("builds plain tool activity content", () => {
+    const content = buildToolPanelContent([
       { callId: "1", line: "`read` \"src/index.ts\"", status: "done" },
       { callId: "2", line: "`edit` \"src/live-discord-renderer.ts\"", status: "running" },
-    ], false).toJSON();
+    ], false);
 
-    expect(embed.title).toContain("Using tools");
-    expect(embed.description).toContain("✅ `read`");
-    expect(embed.description).toContain("🟡 `edit`");
-    expect(embed.footer?.text).toContain("running");
+    expect(content).toContain("Using tools");
+    expect(content).toContain("✅ `read`");
+    expect(content).toContain("🟡 `edit`");
+    expect(content).toContain("running");
   });
 });
