@@ -72,13 +72,14 @@ export interface DiscordPortRuntimeAdapter {
   setProviderApiKey(providerId: string, apiKey: string): void;
   startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }>;
   completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void>;
-  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer): void;
-  clearLiveRenderer(conversationKey: string): void;
+  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void;
+  clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void;
   respond(options: {
     conversationKey: string;
     workspaceKey: string;
     sessionName: string;
     promptText: string;
+    runId?: number;
   }): Promise<string>;
   invokeSkill(options: {
     conversationKey: string;

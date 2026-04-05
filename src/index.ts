@@ -624,14 +624,15 @@ export default function picordExtension(pi: ExtensionAPI) {
   let sessionPool: PiSessionPool | undefined;
   let runtimeLock: RuntimeLock | undefined;
   let slashOnlyMode = false;
-  const liveRenderers = new Map<string, LiveDiscordRunRenderer>();
+  const liveRenderers = new Map<string, { renderer: LiveDiscordRunRenderer; runId?: number }>();
   const conversationNoticeTargets = new Map<string, (content: string) => Promise<void>>();
   const hostControlChannels = new Map<string, string>();
 
-  async function notifyConversation(conversationKey: string, update: PiLiveUpdate): Promise<void> {
-    const renderer = liveRenderers.get(conversationKey);
-    if (!renderer) return;
-    await renderer.onUpdate(update);
+  async function notifyConversation(conversationKey: string, runId: number | undefined, update: PiLiveUpdate): Promise<void> {
+    const entry = liveRenderers.get(conversationKey);
+    if (!entry) return;
+    if (entry.runId !== undefined && runId !== undefined && entry.runId !== runId) return;
+    await entry.renderer.onUpdate(update);
   }
 
   async function notifyAccessRequest(conversationKey: string, content: string): Promise<void> {
@@ -745,7 +746,7 @@ export default function picordExtension(pi: ExtensionAPI) {
 
       const conversationKey = getConversationKeyFromMessage(message);
       const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
-      liveRenderers.set(conversationKey, renderer);
+      liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
           await sendTextResponse(message.channel, content);
@@ -778,7 +779,7 @@ export default function picordExtension(pi: ExtensionAPI) {
 
       const conversationKey = getConversationKeyFromMessage(message);
       const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
-      liveRenderers.set(conversationKey, renderer);
+      liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
           await sendTextResponse(message.channel, content);
@@ -820,7 +821,7 @@ export default function picordExtension(pi: ExtensionAPI) {
     const conversationKey = `discord:guild:${message.guildId!}:thread:${thread.id}`;
     const workspaceKey = getWorkspaceKeyFromMessage(message);
     const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
-    liveRenderers.set(conversationKey, renderer);
+    liveRenderers.set(conversationKey, { renderer });
     conversationNoticeTargets.set(conversationKey, async (content) => {
       await sendTextResponse(thread, content);
     });
@@ -1128,7 +1129,7 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
 
     const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
-    liveRenderers.set(conversationKey, renderer);
+    liveRenderers.set(conversationKey, { renderer });
     conversationNoticeTargets.set(conversationKey, async (content) => {
       const channel = interaction.channel;
       if (channel && "send" in channel) {

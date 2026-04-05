@@ -1,5 +1,10 @@
 import type { ApprovalDecisionMode } from "../access-approval.js";
 import type { LiveDiscordRunRenderer } from "../live-discord-renderer.js";
+
+interface RegisteredLiveRenderer {
+  renderer: LiveDiscordRunRenderer;
+  runId?: number;
+}
 import type { PiSessionPool } from "../pi-session.js";
 import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel } from "../types.js";
 import type {
@@ -14,7 +19,7 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
   constructor(
     public readonly config: PicordRuntimeConfig,
     private readonly sessionPool: PiSessionPool,
-    private readonly liveRenderers: Map<string, LiveDiscordRunRenderer>,
+    private readonly liveRenderers: Map<string, RegisteredLiveRenderer>,
   ) {}
 
   isOwner(userId: string): boolean {
@@ -122,11 +127,14 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.completeOpenAICodexLogin(userId, codeOrUrl);
   }
 
-  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer): void {
-    this.liveRenderers.set(conversationKey, renderer);
+  registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void {
+    this.liveRenderers.set(conversationKey, { renderer, runId });
   }
 
-  clearLiveRenderer(conversationKey: string): void {
+  clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void {
+    const current = this.liveRenderers.get(conversationKey);
+    if (!current) return;
+    if (renderer && current.renderer !== renderer) return;
     this.liveRenderers.delete(conversationKey);
   }
 
@@ -170,6 +178,7 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     workspaceKey: string;
     sessionName: string;
     promptText: string;
+    runId?: number;
   }): Promise<string> {
     return this.sessionPool.respond(options);
   }

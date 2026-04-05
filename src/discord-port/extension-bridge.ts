@@ -131,12 +131,13 @@ export async function startDiscordPortExtensionRuntime({
   }
 
   let client: Client | undefined;
-  const liveRenderers = new Map<string, LiveDiscordRunRenderer>();
+  const liveRenderers = new Map<string, { renderer: LiveDiscordRunRenderer; runId?: number }>();
 
-  const notifyConversation = async (conversationKey: string, update: PiLiveUpdate): Promise<void> => {
-    const renderer = liveRenderers.get(conversationKey);
-    if (!renderer) return;
-    await renderer.onUpdate(update);
+  const notifyConversation = async (conversationKey: string, runId: number | undefined, update: PiLiveUpdate): Promise<void> => {
+    const entry = liveRenderers.get(conversationKey);
+    if (!entry) return;
+    if (entry.runId !== undefined && runId !== undefined && entry.runId !== runId) return;
+    await entry.renderer.onUpdate(update);
   };
 
   const sessionPool = new PiSessionPool(config, async (conversationKey, content) => {

@@ -19,6 +19,12 @@ interface ToolEntry {
   callId: string;
   line: string;
   status: "running" | "done" | "failed";
+  handle?: EditableMessageHandle;
+}
+
+interface AssistantSegment {
+  chunks: string[];
+  handles: EditableMessageHandle[];
 }
 
 export interface LiveMessagePayload {
@@ -147,29 +153,19 @@ function formatToolLine(entry: ToolEntry): string {
   return `${statusIcon} ${entry.line}`;
 }
 
-function getToolEmbedColor(entries: ToolEntry[], finalized: boolean): number {
-  if (entries.some((entry) => entry.status === "failed")) return TOOL_EMBED_COLOR_FAILED;
-  if (finalized) return TOOL_EMBED_COLOR_SUCCESS;
+function getToolEmbedColor(entry: ToolEntry): number {
+  if (entry.status === "failed") return TOOL_EMBED_COLOR_FAILED;
+  if (entry.status === "done") return TOOL_EMBED_COLOR_SUCCESS;
   return TOOL_EMBED_COLOR_RUNNING;
 }
 
-export function buildToolPanelEmbed(entries: ToolEntry[], finalized: boolean): EmbedBuilder {
-  const maxLines = finalized ? MAX_FINAL_TOOL_LINES : MAX_TOOL_LINES;
-  const visibleEntries = entries.slice(-maxLines).map(formatToolLine);
-  const runningCount = entries.filter((entry) => entry.status === "running").length;
-  const failedCount = entries.filter((entry) => entry.status === "failed").length;
-
-  const footer = finalized
-    ? failedCount > 0
-      ? `${failedCount} failed`
-      : "completed"
-    : runningCount > 0
-      ? `${runningCount} running`
-      : "queued";
+export function buildToolPanelEmbed(entry: ToolEntry, index: number): EmbedBuilder {
+  const footer = entry.status === "failed" ? "failed" : entry.status === "done" ? "completed" : "running";
 
   return new EmbedBuilder()
-    .setColor(getToolEmbedColor(entries, finalized))
-    .setDescription(visibleEntries.join("\n"))
+    .setColor(getToolEmbedColor(entry))
+    .setTitle(`🔧 Tool ${index + 1}`)
+    .setDescription(formatToolLine(entry))
     .setFooter({ text: footer });
 }
 
@@ -251,9 +247,9 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
 export class LiveDiscordRunRenderer {
   private readonly tools: ToolEntry[] = [];
   private readonly toolIndexes = new Map<string, number>();
-  private readonly assistantChunks: string[] = [];
-  private toolHandle?: EditableMessageHandle;
-  private assistantHandles: EditableMessageHandle[] = [];
+  private readonly dirtyToolIds = new Set<string>();
+  private readonly assistantSegments: AssistantSegment[] = [];
+  private activeAssistantSegment?: AssistantSegment;
   private toolFlushTimer?: NodeJS.Timeout;
   private assistantFlushTimer?: NodeJS.Timeout;
   private toolFlushPromise: Promise<void> = Promise.resolve();
@@ -269,22 +265,22 @@ export class LiveDiscordRunRenderer {
     if (update.type === "assistant_delta") {
       if (!update.delta) return;
       this.sawAssistantDelta = true;
-      this.assistantChunks.push(update.delta);
+      this.activeAssistantSegment ??= this.createAssistantSegment();
+      this.activeAssistantSegment.chunks.push(update.delta);
       this.scheduleAssistantFlush();
       return;
     }
 
     if (update.type === "tool_start") {
       if (this.toolIndexes.has(update.toolCallId)) return;
+      this.activeAssistantSegment = undefined;
       this.toolIndexes.set(update.toolCallId, this.tools.length);
       this.tools.push({
         callId: update.toolCallId,
         line: formatToolCall(update.toolName, update.args),
         status: "running",
       });
-      if (!this.sawAssistantDelta && this.assistantChunks.length === 0) {
-        this.scheduleAssistantFlush();
-      }
+      this.dirtyToolIds.add(update.toolCallId);
       this.scheduleToolFlush();
       return;
     }
@@ -295,6 +291,7 @@ export class LiveDiscordRunRenderer {
       const entry = this.tools[index];
       if (!entry) return;
       entry.status = update.isError ? "failed" : "done";
+      this.dirtyToolIds.add(update.toolCallId);
       this.scheduleToolFlush();
     }
   }
@@ -304,11 +301,9 @@ export class LiveDiscordRunRenderer {
     this.finalized = true;
 
     if (!this.sawAssistantDelta) {
-      this.assistantChunks.length = 0;
-      this.assistantChunks.push(finalResponse || "Done.");
-    } else if (finalResponse && finalResponse !== this.assistantChunks.join("")) {
-      this.assistantChunks.length = 0;
-      this.assistantChunks.push(finalResponse);
+      const segment = this.createAssistantSegment();
+      segment.chunks.push(finalResponse || "Done.");
+      this.activeAssistantSegment = segment;
     }
 
     for (const entry of this.tools) {
@@ -345,52 +340,67 @@ export class LiveDiscordRunRenderer {
   }
 
   private async flushToolPanel(): Promise<void> {
-    if (this.tools.length === 0) return;
+    if (this.dirtyToolIds.size === 0) return;
 
-    const payload: LiveMessagePayload = { embeds: [buildToolPanelEmbed(this.tools, this.finalized)] };
+    const dirtyEntries = this.tools
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => this.dirtyToolIds.has(entry.callId));
+
     this.toolFlushPromise = this.toolFlushPromise.then(async () => {
-      if (!this.toolHandle) {
-        this.toolHandle = await this.target.createFollowUp(payload);
-        return;
+      for (const { entry, index } of dirtyEntries) {
+        const payload: LiveMessagePayload = { embeds: [buildToolPanelEmbed(entry, index)] };
+        if (!entry.handle) {
+          entry.handle = await this.target.createFollowUp(payload);
+        } else {
+          await entry.handle.edit(payload);
+        }
+        this.dirtyToolIds.delete(entry.callId);
       }
-      await this.toolHandle.edit(payload);
     });
     await this.toolFlushPromise;
   }
 
   private async flushAssistant(): Promise<void> {
-    if (this.assistantChunks.length === 0 && !this.finalized) {
-      this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
-        const payload = { content: RESPONSE_PLACEHOLDER };
-        if (!this.assistantHandles[0]) {
+    const segment = this.activeAssistantSegment;
+    if (!segment) {
+      if (!this.finalized && this.assistantSegments.length === 0 && this.tools.length === 0) {
+        this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
+          const payload = { content: RESPONSE_PLACEHOLDER };
+          const firstSegment = this.createAssistantSegment();
+          this.activeAssistantSegment = firstSegment;
           const handle = await this.target.ensurePrimary(payload);
-          this.assistantHandles.push(handle);
-        } else {
-          await this.assistantHandles[0].edit(payload);
-        }
-      });
-      await this.assistantFlushPromise;
+          firstSegment.handles.push(handle);
+        });
+        await this.assistantFlushPromise;
+      }
       return;
     }
 
-    const rendered = normalizeDiscordText(this.assistantChunks.join("") || "Done.");
+    const rendered = normalizeDiscordText(segment.chunks.join("") || "Done.");
     const chunks = chunkDiscordMarkdown(rendered);
 
     this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
       for (let index = 0; index < chunks.length; index++) {
         const payload = { content: chunks[index] || "Done." };
-        const existing = this.assistantHandles[index];
+        const existing = segment.handles[index];
         if (existing) {
           await existing.edit(payload);
           continue;
         }
-        const handle = index === 0
+        const isFirstMessageOverall = this.assistantSegments[0] === segment && index === 0;
+        const handle = isFirstMessageOverall
           ? await this.target.ensurePrimary(payload)
           : await this.target.createFollowUp(payload);
-        this.assistantHandles.push(handle);
+        segment.handles.push(handle);
       }
     });
 
     await this.assistantFlushPromise;
+  }
+
+  private createAssistantSegment(): AssistantSegment {
+    const segment: AssistantSegment = { chunks: [], handles: [] };
+    this.assistantSegments.push(segment);
+    return segment;
   }
 }

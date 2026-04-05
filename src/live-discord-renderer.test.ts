@@ -28,16 +28,14 @@ describe("live discord renderer helpers", () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 
-  it("builds a tool container without a tools-used label", () => {
-    const embed = buildToolPanelEmbed([
-      { callId: "1", line: "`read` \"src/index.ts\"", status: "done" },
+  it("builds a per-tool container with a numbered label", () => {
+    const embed = buildToolPanelEmbed(
       { callId: "2", line: "`edit` \"src/live-discord-renderer.ts\"", status: "running" },
-    ], false).toJSON();
+      1,
+    ).toJSON();
 
-    expect(embed.title).toBeUndefined();
-    expect(embed.description).toContain("✅ `read`");
+    expect(embed.title).toContain("Tool 2");
     expect(embed.description).toContain("🟡 `edit`");
-    expect(embed.description).not.toContain("Tools used");
     expect(embed.footer?.text).toContain("running");
   });
 });

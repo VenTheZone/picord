@@ -80,6 +80,15 @@ export function registerDiscordPortBot({
   onError?: (message: string) => void;
 }) {
   registerDiscordPortInteractionHandler({ client, runtime, onReload });
+  const latestRunIds = new Map<string, number>();
+
+  const nextRunId = (conversationKey: string): number => {
+    const runId = (latestRunIds.get(conversationKey) ?? 0) + 1;
+    latestRunIds.set(conversationKey, runId);
+    return runId;
+  };
+
+  const isLatestRun = (conversationKey: string, runId: number): boolean => latestRunIds.get(conversationKey) === runId;
 
   if (enableMessageContent) {
     client.on(Events.MessageCreate, async (message) => {
@@ -116,7 +125,7 @@ export function registerDiscordPortBot({
           });
           await renderer.finalize(dmResponse);
         } finally {
-          runtime.adapter.clearLiveRenderer(conversationKey);
+          runtime.adapter.clearLiveRenderer(conversationKey, renderer);
         }
         return;
       }
@@ -132,16 +141,29 @@ export function registerDiscordPortBot({
 
         const thread = message.channel as Parameters<typeof runtime.continueThread>[0]["thread"];
         const binding = runtime.bindThread(thread);
+        const runId = nextRunId(binding.conversationKey);
+        await runtime.adapter.abort(binding.conversationKey).catch(() => false);
         const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
-        runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer);
+        runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer, runId);
         try {
-          const response = await runtime.continueThread({
-            thread,
-            message,
+          const response = await runtime.adapter.respond({
+            conversationKey: binding.conversationKey,
+            workspaceKey: binding.workspaceKey,
+            sessionName: binding.sessionName,
+            promptText: buildPromptFromMessage(message, promptText),
+            runId,
           });
+          if (!isLatestRun(binding.conversationKey, runId)) {
+            return;
+          }
           await renderer.finalize(response);
+        } catch (error) {
+          if (!isLatestRun(binding.conversationKey, runId)) {
+            return;
+          }
+          throw error;
         } finally {
-          runtime.adapter.clearLiveRenderer(binding.conversationKey);
+          runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
         }
         return;
       }
@@ -169,7 +191,7 @@ export function registerDiscordPortBot({
         });
         await renderer.finalize(response);
       } finally {
-        runtime.adapter.clearLiveRenderer(binding.conversationKey);
+        runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
       }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);

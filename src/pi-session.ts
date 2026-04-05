@@ -108,12 +108,12 @@ export class PiSessionPool {
   private readonly approvals: AccessApprovalManager;
   private readonly registry: WorkspaceRegistry;
   private readonly pendingOAuthLogins = new Map<string, PendingOAuthLogin>();
-  private readonly notifyLiveUpdate?: (conversationKey: string, update: PiLiveUpdate) => Promise<void>;
+  private readonly notifyLiveUpdate?: (conversationKey: string, runId: number | undefined, update: PiLiveUpdate) => Promise<void>;
 
   constructor(
     private readonly config: PicordRuntimeConfig,
     notifyAccessRequest: (conversationKey: string, content: string) => Promise<void>,
-    notifyLiveUpdate?: (conversationKey: string, update: PiLiveUpdate) => Promise<void>,
+    notifyLiveUpdate?: (conversationKey: string, runId: number | undefined, update: PiLiveUpdate) => Promise<void>,
   ) {
     this.approvals = new AccessApprovalManager(config.ownerUserId, notifyAccessRequest);
     this.registry = new WorkspaceRegistry(config.statePath);
@@ -372,6 +372,7 @@ export class PiSessionPool {
     workspaceKey: string;
     sessionName: string;
     promptText: string;
+    runId?: number;
   }): Promise<string> {
     return this.runExclusive(options.conversationKey, async () => {
       const handle = await this.getOrCreateSession(options);
@@ -386,7 +387,7 @@ export class PiSessionPool {
       const enqueueUpdate = (update: PiLiveUpdate) => {
         if (!this.notifyLiveUpdate) return;
         notifyQueue = notifyQueue
-          .then(() => this.notifyLiveUpdate?.(options.conversationKey, update))
+          .then(() => this.notifyLiveUpdate?.(options.conversationKey, options.runId, update))
           .catch((error) => {
             console.error("Failed to deliver live update:", error);
           });
