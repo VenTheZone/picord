@@ -1,35 +1,42 @@
-import { EmbedBuilder, type ChatInputCommandInteraction, type Message } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, type ChatInputCommandInteraction, type Message } from "discord.js";
 import { toDiscordChunks } from "./conversation.js";
 
-const TOOL_FLUSH_INTERVAL_MS = 75;
-const ASSISTANT_FLUSH_INTERVAL_MS = 100;
-const MAX_TOOL_LINES = 12;
-const MAX_FINAL_TOOL_LINES = 6;
+const FLUSH_INTERVAL_MS = 75;
 const RESPONSE_PLACEHOLDER = "_thinking…_";
-const TOOL_EMBED_COLOR_RUNNING = 0xf59e0b;
-const TOOL_EMBED_COLOR_SUCCESS = 0x22c55e;
-const TOOL_EMBED_COLOR_FAILED = 0xef4444;
 
 export type PiLiveUpdate =
   | { type: "assistant_delta"; delta: string }
+  | { type: "run_state"; modelReference?: string; thinkingLevel?: string; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean };
+  | { type: "tool_update"; toolCallId: string; toolName: string; args?: unknown; detail?: unknown }
+  | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; args?: unknown; detail?: unknown };
 
 interface ToolEntry {
   callId: string;
+  toolName: string;
   line: string;
   status: "running" | "done" | "failed";
-  handle?: EditableMessageHandle;
+  args?: unknown;
+  detail?: string;
+  outputDetail?: unknown;
 }
 
-interface AssistantSegment {
-  chunks: string[];
-  handles: EditableMessageHandle[];
+interface AssistantEntry {
+  kind: "assistant";
+  text: string;
 }
+
+interface ToolTimelineEntry {
+  kind: "tool";
+  tool: ToolEntry;
+}
+
+type TimelineEntry = AssistantEntry | ToolTimelineEntry;
 
 export interface LiveMessagePayload {
   content?: string;
   embeds?: EmbedBuilder[];
+  components?: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>;
 }
 
 interface EditableMessageHandle {
@@ -109,64 +116,107 @@ function extractPathArg(args: unknown): string | undefined {
     ?? summarizeValue(record.file_path)
     ?? summarizeValue(record.file)
     ?? summarizeValue(record.target)
-    ?? summarizeValue(record.symbol_id);
+    ?? summarizeValue(record.symbol_id)
+    ?? summarizeValue(record.cwd);
 }
 
 function extractCommandArg(args: unknown): string | undefined {
+  if (typeof args === "string") return summarizeValue(args, 100);
   if (!args || typeof args !== "object") return undefined;
   const record = args as Record<string, unknown>;
   return summarizeValue(record.command, 100)
+    ?? summarizeValue(record.pattern, 100)
     ?? summarizeValue(record.query)
     ?? summarizeValue(record.oldText, 60)
-    ?? summarizeValue(record.content, 60);
+    ?? summarizeValue(record.content, 100)
+    ?? summarizeValue(record.error, 100)
+    ?? summarizeValue(record.stderr, 100)
+    ?? summarizeValue(record.stdout, 100);
+}
+
+function formatEditDelta(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const record = args as Record<string, unknown>;
+  const edits = Array.isArray(record.edits) ? record.edits : undefined;
+  if (!edits || edits.length === 0) return undefined;
+
+  let added = 0;
+  let removed = 0;
+  for (const entry of edits) {
+    if (!entry || typeof entry !== "object") continue;
+    const editEntry = entry as Record<string, unknown>;
+    const oldText = typeof editEntry.oldText === "string" ? editEntry.oldText : "";
+    const newText = typeof editEntry.newText === "string" ? editEntry.newText : "";
+    const oldLines = oldText.length === 0 ? 0 : oldText.split("\n").length;
+    const newLines = newText.length === 0 ? 0 : newText.split("\n").length;
+    if (newLines > oldLines) added += newLines - oldLines;
+    if (oldLines > newLines) removed += oldLines - newLines;
+  }
+
+  if (added === 0 && removed === 0) return undefined;
+  return `+${added} -${removed}`;
 }
 
 export function formatToolCall(toolName: string, args: unknown): string {
   const path = extractPathArg(args);
   const command = extractCommandArg(args);
 
-  if ((toolName === "read" || toolName === "edit" || toolName === "write" || toolName === "find") && path) {
-    return `\`${toolName}\` "${path}"`;
+  if (toolName === "subagent" && args && typeof args === "object") {
+    const record = args as Record<string, unknown>;
+    const scope = typeof record.agentScope === "string" ? ` [${record.agentScope}]` : "";
+    if (typeof record.agent === "string") {
+      const taskPreview = typeof record.task === "string" ? summarizeValue(record.task, 60) : undefined;
+      return taskPreview
+        ? `\`subagent\` \`${record.agent}${scope}\` \`${taskPreview}\``
+        : `\`subagent\` \`${record.agent}${scope}\``;
+    }
+    if (Array.isArray(record.tasks)) {
+      return `\`subagent\` \`parallel (${record.tasks.length} tasks)${scope}\``;
+    }
+    if (Array.isArray(record.chain)) {
+      return `\`subagent\` \`chain (${record.chain.length} steps)${scope}\``;
+    }
+    return `\`subagent\`${scope ? ` \`${scope.trim()}\`` : ""}`;
   }
 
-  if (toolName === "bash" && command) {
-    return `\`bash\` "${command}"`;
+  if (toolName === "bash") {
+    const cwd = path && command ? `${path} · ${command}` : command ?? path;
+    if (cwd) return `\`bash\` \`${cwd}\``;
   }
 
-  if (toolName === "grep" && command) {
-    return `\`grep\` "${command}"`;
+  if (toolName === "edit") {
+    const delta = formatEditDelta(args);
+    if (path && delta) return `\`edit\` \`${path}\` \`${delta}\``;
+    if (path) return `\`edit\` \`${path}\``;
   }
 
-  if (path) {
-    return `\`${toolName}\` "${path}"`;
+  if ((toolName === "read" || toolName === "write" || toolName === "find" || toolName === "ls") && path) {
+    return `\`${toolName}\` \`${path}\``;
   }
 
-  if (command) {
-    return `\`${toolName}\` "${command}"`;
+  if (toolName === "grep") {
+    const target = path ? `${path}${command ? ` ${command}` : ""}`.trim() : command;
+    if (target) return `\`grep\` \`${target}\``;
   }
 
+  if (path) return `\`${toolName}\` \`${path}\``;
+  if (command) return `\`${toolName}\` \`${command}\``;
   return `\`${toolName}\``;
+}
+
+function formatFailureDetail(args: unknown): string | undefined {
+  const command = extractCommandArg(args);
+  if (!command) return undefined;
+  const singleLine = command.replace(/\s+/g, " ").trim();
+  if (!singleLine) return undefined;
+  return singleLine.length <= 140 ? singleLine : `${singleLine.slice(0, 139)}…`;
 }
 
 function formatToolLine(entry: ToolEntry): string {
   const statusIcon = entry.status === "failed" ? "❌" : entry.status === "done" ? "✅" : "🟡";
-  return `${statusIcon} ${entry.line}`;
-}
-
-function getToolEmbedColor(entry: ToolEntry): number {
-  if (entry.status === "failed") return TOOL_EMBED_COLOR_FAILED;
-  if (entry.status === "done") return TOOL_EMBED_COLOR_SUCCESS;
-  return TOOL_EMBED_COLOR_RUNNING;
-}
-
-export function buildToolPanelEmbed(entry: ToolEntry, index: number): EmbedBuilder {
-  const footer = entry.status === "failed" ? "failed" : entry.status === "done" ? "completed" : "running";
-
-  return new EmbedBuilder()
-    .setColor(getToolEmbedColor(entry))
-    .setTitle(`🔧 Tool ${index + 1}`)
-    .setDescription(formatToolLine(entry))
-    .setFooter({ text: footer });
+  return entry.status === "failed" && entry.detail
+    ? `${statusIcon} ${entry.line}\n  ↳ ${entry.detail}`
+    : `${statusIcon} ${entry.line}`;
 }
 
 async function createChannelHandle(
@@ -176,21 +226,26 @@ async function createChannelHandle(
   const message = await send(payload);
   return {
     edit: async (next) => {
-      await message.edit({ content: next.content ?? null, embeds: next.embeds ?? [], allowedMentions: { parse: [] } });
+      await message.edit({
+        content: next.content ?? null,
+        embeds: next.embeds ?? [],
+        components: next.components ?? [],
+        allowedMentions: { parse: [] },
+      });
     },
   };
 }
 
 export function createChannelLiveMessageTarget(channel: {
-  send: (options: { content?: string; embeds?: EmbedBuilder[]; allowedMentions: { parse: [] } }) => Promise<Message>;
+  send: (options: { content?: string; embeds?: EmbedBuilder[]; components?: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>; allowedMentions: { parse: [] } }) => Promise<Message>;
 }): LiveMessageTarget {
   return {
     ensurePrimary: (payload) => createChannelHandle(
-      (value) => channel.send({ content: value.content, embeds: value.embeds, allowedMentions: { parse: [] } }),
+      (value) => channel.send({ content: value.content, embeds: value.embeds, components: value.components, allowedMentions: { parse: [] } }),
       payload,
     ),
     createFollowUp: (payload) => createChannelHandle(
-      (value) => channel.send({ content: value.content, embeds: value.embeds, allowedMentions: { parse: [] } }),
+      (value) => channel.send({ content: value.content, embeds: value.embeds, components: value.components, allowedMentions: { parse: [] } }),
       payload,
     ),
   };
@@ -201,7 +256,7 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
 
   return {
     ensurePrimary: async (payload) => {
-      const request = { content: payload.content, embeds: payload.embeds };
+      const request = { content: payload.content, embeds: payload.embeds, components: payload.components };
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(request);
       } else {
@@ -210,17 +265,17 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
       primaryInitialized = true;
       return {
         edit: async (next) => {
-          await interaction.editReply({ content: next.content, embeds: next.embeds });
+          await interaction.editReply({ content: next.content, embeds: next.embeds, components: next.components });
         },
       };
     },
     createFollowUp: async (payload) => {
       if (!primaryInitialized && !(interaction.deferred || interaction.replied)) {
-        await interaction.reply({ content: payload.content, embeds: payload.embeds, ephemeral: true });
+        await interaction.reply({ content: payload.content, embeds: payload.embeds, components: payload.components, ephemeral: true });
         primaryInitialized = true;
         return {
           edit: async (next) => {
-            await interaction.editReply({ content: next.content, embeds: next.embeds });
+            await interaction.editReply({ content: next.content, embeds: next.embeds, components: next.components });
           },
         };
       }
@@ -228,6 +283,7 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
       const message = await interaction.followUp({
         content: payload.content,
         embeds: payload.embeds,
+        components: payload.components,
         allowedMentions: { parse: [] },
         ephemeral: true,
         fetchReply: true,
@@ -237,7 +293,12 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
       }
       return {
         edit: async (next) => {
-          await message.edit({ content: next.content ?? null, embeds: next.embeds ?? [], allowedMentions: { parse: [] } });
+          await message.edit({
+            content: next.content ?? null,
+            embeds: next.embeds ?? [],
+            components: next.components ?? [],
+            allowedMentions: { parse: [] },
+          });
         },
       };
     },
@@ -245,54 +306,123 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
 }
 
 export class LiveDiscordRunRenderer {
-  private readonly tools: ToolEntry[] = [];
-  private readonly toolIndexes = new Map<string, number>();
-  private readonly dirtyToolIds = new Set<string>();
-  private readonly assistantSegments: AssistantSegment[] = [];
-  private activeAssistantSegment?: AssistantSegment;
-  private toolFlushTimer?: NodeJS.Timeout;
-  private assistantFlushTimer?: NodeJS.Timeout;
-  private toolFlushPromise: Promise<void> = Promise.resolve();
-  private assistantFlushPromise: Promise<void> = Promise.resolve();
+  private readonly tools = new Map<string, ToolEntry>();
+  private readonly timeline: TimelineEntry[] = [];
+  private readonly handles: EditableMessageHandle[] = [];
+  private activeAssistantEntry?: AssistantEntry;
+  private flushTimer?: NodeJS.Timeout;
+  private flushPromise: Promise<void> = Promise.resolve();
   private finalized = false;
   private sawAssistantDelta = false;
+  private skillLabel?: string;
+  private skillDetails?: string;
+  private runModelReference?: string;
+  private runThinkingLevel?: string;
+  private runContextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+  private accessRequest?: { content: string; requestId?: string; handle?: EditableMessageHandle };
 
   constructor(private readonly target: LiveMessageTarget) {}
+
+  setSkillContext(skillName: string, args?: string): void {
+    this.skillLabel = skillName;
+    this.skillDetails = args?.trim() ? args.trim() : undefined;
+  }
+
+  async showAccessRequest(content: string, requestId?: string): Promise<void> {
+    const summaryMatch = content.match(/Requested action:\s*(.+)/);
+    const summary = summaryMatch ? summaryMatch[1]?.trim() : content;
+
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("🔒 Permission Request")
+      .setDescription(summary || content)
+      .setFooter({ text: requestId ? `Request ID: ${requestId}` : "Action requires owner approval" });
+
+    const payload: LiveMessagePayload = {
+      content: "",
+      embeds: [embed],
+      components: requestId
+        ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`access:once:${requestId}`).setLabel("Allow once").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`access:always:${requestId}`).setLabel("Always allow").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`access:deny:${requestId}`).setLabel("Deny").setStyle(ButtonStyle.Danger),
+          )]
+        : [],
+    };
+
+    if (!this.accessRequest?.handle) {
+      const handle = await this.target.createFollowUp(payload);
+      this.accessRequest = { content, requestId, handle };
+      return;
+    }
+
+    await this.accessRequest.handle.edit(payload);
+    this.accessRequest = { ...this.accessRequest, content, requestId };
+  }
 
   async onUpdate(update: PiLiveUpdate): Promise<void> {
     if (this.finalized) return;
 
+    if (update.type === "run_state") {
+      this.runModelReference = update.modelReference ?? this.runModelReference;
+      this.runThinkingLevel = update.thinkingLevel ?? this.runThinkingLevel;
+      this.runContextUsage = update.contextUsage ?? this.runContextUsage;
+      this.scheduleFlush();
+      return;
+    }
+
     if (update.type === "assistant_delta") {
       if (!update.delta) return;
       this.sawAssistantDelta = true;
-      this.activeAssistantSegment ??= this.createAssistantSegment();
-      this.activeAssistantSegment.chunks.push(update.delta);
-      this.scheduleAssistantFlush();
+      this.activeAssistantEntry ??= this.createAssistantEntry();
+      this.activeAssistantEntry.text += update.delta;
+      this.scheduleFlush();
       return;
     }
 
     if (update.type === "tool_start") {
-      if (this.toolIndexes.has(update.toolCallId)) return;
-      this.activeAssistantSegment = undefined;
-      this.toolIndexes.set(update.toolCallId, this.tools.length);
-      this.tools.push({
+      if (this.tools.has(update.toolCallId)) return;
+      this.activeAssistantEntry = undefined;
+      const tool: ToolEntry = {
         callId: update.toolCallId,
+        toolName: update.toolName,
         line: formatToolCall(update.toolName, update.args),
         status: "running",
-      });
-      this.dirtyToolIds.add(update.toolCallId);
-      this.scheduleToolFlush();
+        args: update.args,
+      };
+      this.tools.set(update.toolCallId, tool);
+      this.timeline.push({ kind: "tool", tool });
+      this.scheduleFlush();
+      return;
+    }
+
+    if (update.type === "tool_update") {
+      const entry = this.tools.get(update.toolCallId);
+      if (!entry) return;
+      if (typeof update.args !== "undefined") {
+        entry.args = update.args;
+        entry.line = formatToolCall(update.toolName, update.args);
+      }
+      if (typeof update.detail !== "undefined") {
+        entry.outputDetail = update.detail;
+      }
+      this.scheduleFlush();
       return;
     }
 
     if (update.type === "tool_end") {
-      const index = this.toolIndexes.get(update.toolCallId);
-      if (index === undefined) return;
-      const entry = this.tools[index];
+      const entry = this.tools.get(update.toolCallId);
       if (!entry) return;
+      if (typeof update.args !== "undefined") {
+        entry.args = update.args;
+        entry.line = formatToolCall(update.toolName, update.args);
+      }
+      if (typeof update.detail !== "undefined") {
+        entry.outputDetail = update.detail;
+      }
       entry.status = update.isError ? "failed" : "done";
-      this.dirtyToolIds.add(update.toolCallId);
-      this.scheduleToolFlush();
+      entry.detail = update.isError ? formatFailureDetail(update.detail ?? update.args) : undefined;
+      this.scheduleFlush();
     }
   }
 
@@ -301,106 +431,97 @@ export class LiveDiscordRunRenderer {
     this.finalized = true;
 
     if (!this.sawAssistantDelta) {
-      const segment = this.createAssistantSegment();
-      segment.chunks.push(finalResponse || "Done.");
-      this.activeAssistantSegment = segment;
+      this.activeAssistantEntry ??= this.createAssistantEntry();
+      this.activeAssistantEntry.text += finalResponse || "Done.";
     }
 
-    for (const entry of this.tools) {
+    for (const entry of this.tools.values()) {
       if (entry.status === "running") entry.status = "done";
     }
 
-    if (this.toolFlushTimer) {
-      clearTimeout(this.toolFlushTimer);
-      this.toolFlushTimer = undefined;
-    }
-    if (this.assistantFlushTimer) {
-      clearTimeout(this.assistantFlushTimer);
-      this.assistantFlushTimer = undefined;
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
     }
 
-    await this.flushToolPanel();
-    await this.flushAssistant();
+    await this.flush();
   }
 
-  private scheduleToolFlush() {
-    if (this.toolFlushTimer) return;
-    this.toolFlushTimer = setTimeout(() => {
-      this.toolFlushTimer = undefined;
-      void this.flushToolPanel();
-    }, TOOL_FLUSH_INTERVAL_MS);
+  private createAssistantEntry(): AssistantEntry {
+    const entry: AssistantEntry = { kind: "assistant", text: "" };
+    this.timeline.push(entry);
+    return entry;
   }
 
-  private scheduleAssistantFlush() {
-    if (this.assistantFlushTimer) return;
-    this.assistantFlushTimer = setTimeout(() => {
-      this.assistantFlushTimer = undefined;
-      void this.flushAssistant();
-    }, ASSISTANT_FLUSH_INTERVAL_MS);
+  private scheduleFlush() {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined;
+      void this.flush();
+    }, FLUSH_INTERVAL_MS);
   }
 
-  private async flushToolPanel(): Promise<void> {
-    if (this.dirtyToolIds.size === 0) return;
+  private buildTranscript(): string {
+    const lines: string[] = [];
 
-    const dirtyEntries = this.tools
-      .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => this.dirtyToolIds.has(entry.callId));
-
-    this.toolFlushPromise = this.toolFlushPromise.then(async () => {
-      for (const { entry, index } of dirtyEntries) {
-        const payload: LiveMessagePayload = { embeds: [buildToolPanelEmbed(entry, index)] };
-        if (!entry.handle) {
-          entry.handle = await this.target.createFollowUp(payload);
-        } else {
-          await entry.handle.edit(payload);
-        }
-        this.dirtyToolIds.delete(entry.callId);
+    if (this.skillLabel) {
+      lines.push(`🧠 skill \`${this.skillLabel}\``);
+      if (this.skillDetails) {
+        lines.push(this.skillDetails);
       }
-    });
-    await this.toolFlushPromise;
-  }
-
-  private async flushAssistant(): Promise<void> {
-    const segment = this.activeAssistantSegment;
-    if (!segment) {
-      if (!this.finalized && this.assistantSegments.length === 0 && this.tools.length === 0) {
-        this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
-          const payload = { content: RESPONSE_PLACEHOLDER };
-          const firstSegment = this.createAssistantSegment();
-          this.activeAssistantSegment = firstSegment;
-          const handle = await this.target.ensurePrimary(payload);
-          firstSegment.handles.push(handle);
-        });
-        await this.assistantFlushPromise;
-      }
-      return;
+      lines.push("");
     }
 
-    const rendered = normalizeDiscordText(segment.chunks.join("") || "Done.");
-    const chunks = chunkDiscordMarkdown(rendered);
+    for (const entry of this.timeline) {
+      if (entry.kind === "assistant") {
+        const text = entry.text.trim();
+        if (!text) continue;
+        lines.push(text, "");
+        continue;
+      }
 
-    this.assistantFlushPromise = this.assistantFlushPromise.then(async () => {
+      lines.push(formatToolLine(entry.tool), "");
+    }
+
+    const contextLine = this.runContextUsage
+      ? this.runContextUsage.tokens === null
+        ? `- Context: estimating / ${this.runContextUsage.contextWindow.toLocaleString()}`
+        : `- Context: ${this.runContextUsage.tokens.toLocaleString()} / ${this.runContextUsage.contextWindow.toLocaleString()} (${(this.runContextUsage.percent ?? 0).toFixed(1)}%)`
+      : undefined;
+
+    const metadata = [
+      this.runModelReference ? `- Model: ${this.runModelReference}` : undefined,
+      this.runThinkingLevel ? `- Thinking: ${this.runThinkingLevel}` : undefined,
+      contextLine,
+    ].filter((line): line is string => Boolean(line));
+
+    if (metadata.length > 0) {
+      lines.push(metadata.join("\n"));
+    }
+
+    const rendered = lines.join("\n").trim();
+    return rendered || RESPONSE_PLACEHOLDER;
+  }
+
+  private async flush(): Promise<void> {
+    this.flushPromise = this.flushPromise.then(async () => {
+      const rendered = normalizeDiscordText(this.buildTranscript());
+      const chunks = chunkDiscordMarkdown(rendered);
+
       for (let index = 0; index < chunks.length; index++) {
-        const payload = { content: chunks[index] || "Done." };
-        const existing = segment.handles[index];
+        const payload: LiveMessagePayload = { content: chunks[index] || "Done." };
+        const existing = this.handles[index];
         if (existing) {
           await existing.edit(payload);
           continue;
         }
-        const isFirstMessageOverall = this.assistantSegments[0] === segment && index === 0;
-        const handle = isFirstMessageOverall
+        const handle = index === 0
           ? await this.target.ensurePrimary(payload)
           : await this.target.createFollowUp(payload);
-        segment.handles.push(handle);
+        this.handles.push(handle);
       }
     });
 
-    await this.assistantFlushPromise;
-  }
-
-  private createAssistantSegment(): AssistantSegment {
-    const segment: AssistantSegment = { chunks: [], handles: [] };
-    this.assistantSegments.push(segment);
-    return segment;
+    await this.flushPromise;
   }
 }

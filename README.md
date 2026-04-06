@@ -1,10 +1,10 @@
 # picord
 
-`picord` is a Discord integration extension for pi / pi-mono.
+`picord` is a Discord integration for pi / pi-mono.
 
 npm package: `@venthezone/picord`
 
-It lets you run pi from Discord while keeping pi’s native sessions, models, skills, and extensions.
+It lets you use pi from Discord while keeping pi’s native sessions, models, skills, and extensions.
 
 ## Mental model
 
@@ -16,21 +16,24 @@ In a guild:
 In DMs:
 - the DM acts like a direct personal session
 
+If you remember one thing, remember this:
+**channel = workspace, thread = session**.
+
 ## Runtime
 
 - Default runtime: `discord-port`
 - Legacy fallback: `PICORD_RUNTIME_ARCH=legacy`
 
-`discord-port` is the main runtime now.
+`discord-port` is the main runtime and the one you should use unless you have a specific reason not to.
 
 ## What picord gives you
 
-- Discord bot integration as a pi extension
+- a Discord bot that runs pi as an extension
 - project channel → workspace mapping
 - thread → pi session binding
 - pi skills exposed as slash commands
 - model and thinking controls from Discord
-- provider login and API key update flow from Discord
+- provider login and API key update flows from Discord
 - native pi session resume support
 - workspace-only file access by default
 - approval flow for blocked or out-of-workspace access
@@ -133,7 +136,7 @@ pi -e ./src/index.ts --no-session
 
 ### 7. Run picord in tmux
 
-For a stable VPS/runtime setup, run picord in its own tmux session from the local repo source.
+For a stable VPS or remote setup, run picord in its own tmux session from the local repo source.
 
 Recommended workflow:
 
@@ -158,7 +161,7 @@ npm run picord:restart
 npm run picord:stop
 ```
 
-The wrapper script keeps startup consistent by:
+The wrapper script keeps startup predictable by:
 - requiring `.env`
 - running `npm run sync:discord-commands`
 - stopping the `picord` systemd service first if it is active
@@ -170,7 +173,7 @@ If you want to inspect the live tmux session directly:
 tmux attach -t picord
 ```
 
-This is the recommended way to keep picord running on a remote machine while still using the live local source tree.
+This is the recommended way to keep picord running on a remote machine while still using the live source tree.
 
 ### 8. Verify the setup
 
@@ -233,7 +236,7 @@ export PICORD_RUNTIME_ARCH=legacy
 - `cwd`: default workspace root for DMs or unmapped channels
 - `statePath`: persistent state for managed project channels and thread/session bindings
 - `workspaceBasePath`: base directory used by `/project-create`; defaults to `~/.picord/workspace`
-- `workspaceRoots`: optional static mapping of project channel ID → local workspace path; leave it empty if you want `/project-create` to manage channels and workspace folders for you
+- `workspaceRoots`: optional static mapping of project channel ID → local workspace path; leave it empty if you want `/project-create` to manage channels and workspace folders
 - `allowedChannelIds`: static channel allowlist; bot-managed project channels are added from state
 - `allowedRoleIds` / `allowedRoleNames`: required guild roles for normal bot usage
 - `allowedUserIds`: explicit user allowlist
@@ -252,6 +255,8 @@ export PICORD_RUNTIME_ARCH=legacy
 3. keep working inside the thread
 4. that thread stays bound to the same pi session
 
+That is the main flow for normal project use.
+
 Use the host control channel for owner and admin actions like:
 - `/project-create`
 - `/add-project`
@@ -266,13 +271,15 @@ Use the host control channel for owner and admin actions like:
 - `/access-deny`
 
 `/add-project` opens a picker for direct subfolders under `workspaceBasePath` and creates or reuses a project channel automatically.
+
 For advanced manual binding, use `/add-project-path`. In `current-channel` mode, run it as the owner in the channel you want to bind.
 
-`/session` works in the host channel and lets you pick an existing pi session. Picord will create or reuse the matching project channel for that session's workspace, create a thread, and resume the selected session there.
+`/session` works in the host channel and lets you pick an existing pi session. Picord will create or reuse the matching project channel for that session workspace, create a thread, and resume the selected session there.
 
 ### In DMs
 
 DMs work as a direct session using the configured default workspace.
+This is useful for quick personal tasks when you do not need a guild project channel.
 
 ## Commands
 
@@ -297,7 +304,7 @@ DMs work as a direct session using the configured default workspace.
 
 ### Owner and admin
 
-These must be run in the configured host control channel.
+These commands must be run in the configured host control channel.
 
 - `/reload`
 - `/login`
@@ -349,7 +356,7 @@ npm run smoke:discord:legacy
 npm run sync:discord-commands
 ```
 
-If you are running picord from the local source tree in tmux on a VPS, use the runtime wrapper script for a consistent state:
+If you are running picord from the local source tree in tmux on a VPS, use the runtime wrapper script for a consistent setup:
 
 ```bash
 cd /path/to/picord

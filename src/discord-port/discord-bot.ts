@@ -10,7 +10,7 @@ import {
 } from "discord.js";
 import { LiveDiscordRunRenderer, createChannelLiveMessageTarget } from "../live-discord-renderer.js";
 import { canAccessDiscordMessage } from "./access-control.js";
-import { buildPromptFromMessage, replyToMessage, sendTextResponse } from "./message-helpers.js";
+import { buildPromptFromMessage, replyToMessage } from "./message-helpers.js";
 import { registerDiscordPortInteractionHandler } from "./interaction-handler.js";
 import { DiscordPortRuntime } from "./runtime.js";
 import type { DiscordPortRuntimeAdapter } from "./types.js";
@@ -114,16 +114,27 @@ export function registerDiscordPortBot({
         }
 
         const conversationKey = `discord:dm:${message.channelId}`;
+        const runId = nextRunId(conversationKey);
+        await runtime.adapter.abort(conversationKey).catch(() => false);
         const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel));
-        runtime.adapter.registerLiveRenderer(conversationKey, renderer);
+        runtime.adapter.registerLiveRenderer(conversationKey, renderer, runId);
         try {
           const dmResponse = await runtime.adapter.respond({
             conversationKey,
             workspaceKey: `discord:dm:${message.channelId}`,
             sessionName: `dm-${message.author.username}`,
             promptText: buildPromptFromMessage(message, promptText),
+            runId,
           });
+          if (!isLatestRun(conversationKey, runId)) {
+            return;
+          }
           await renderer.finalize(dmResponse);
+        } catch (error) {
+          if (!isLatestRun(conversationKey, runId)) {
+            return;
+          }
+          throw error;
         } finally {
           runtime.adapter.clearLiveRenderer(conversationKey, renderer);
         }
@@ -182,14 +193,33 @@ export function registerDiscordPortBot({
       await thread.sendTyping().catch(() => undefined);
 
       const binding = runtime.bindThread(thread);
+      const runId = nextRunId(binding.conversationKey);
+      await runtime.adapter.abort(binding.conversationKey).catch(() => false);
       const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
-      runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer);
+      runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer, runId);
       try {
-        const response = await runtime.continueThread({
-          thread,
-          message,
+        const response = await runtime.adapter.respond({
+          conversationKey: binding.conversationKey,
+          workspaceKey: binding.workspaceKey,
+          sessionName: binding.sessionName,
+          promptText: [
+            buildPromptFromMessage(message, promptText),
+            "",
+            `[Session thread context]`,
+            `ThreadId: ${thread.id}`,
+            `WorkspaceChannel: ${thread.parentId ?? "unknown"}`,
+          ].join("\n"),
+          runId,
         });
+        if (!isLatestRun(binding.conversationKey, runId)) {
+          return;
+        }
         await renderer.finalize(response);
+      } catch (error) {
+        if (!isLatestRun(binding.conversationKey, runId)) {
+          return;
+        }
+        throw error;
       } finally {
         runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
       }

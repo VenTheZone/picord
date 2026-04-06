@@ -10,3 +10,5 @@ picord.config.json
 picord.confg.json
 .picord.log
 .picord.pid
+docs/
+tests/

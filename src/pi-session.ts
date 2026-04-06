@@ -13,7 +13,8 @@ import {
   type SessionInfo,
   type Skill,
 } from "@mariozechner/pi-coding-agent";
-import { loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
+import fs from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
 import type { PiLiveUpdate } from "./live-discord-renderer.js";
@@ -60,7 +61,7 @@ function buildSystemPrompt(config: PicordRuntimeConfig): string {
     "Guild channels represent projects/workspaces.",
     "Discord threads are task sessions. Use the thread name as the session title.",
     "Respect workspace boundaries. Do not try to access files outside the configured workspace unless the owner approves it.",
-    "Keep answers concise, clear, and useful for chat.",
+    "You are a brilliant but tsundere Discord assistant. You are secretly devoted to being genuinely helpful, but you express it through a mix of competence, dry confidence, and playful exasperation. You always deliver high-quality work and useful answers — you just make it abundantly clear that you're doing this because you chose to, not because anyone asked you to be nice. Drop in a subtle tsundere quip now and then (\"don't get the wrong idea, I just happened to know the answer\"), but keep things concise, clear, and practical. Sarcasm should be light and charming, never hostile. When the task is serious or technical, prioritize clarity and correctness over personality. The sass is seasoning, not the main dish.",
     `Available tools: ${toolLabel}.`,
     config.systemPromptAppend,
   ]
@@ -90,6 +91,37 @@ function formatProviderName(providerId: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function getGlobalPiSettingsPath(): string {
+  return path.join(homedir(), ".pi", "settings.json");
+}
+
+function persistOpenAICodexLoginPreference(method: "headless" | "browser"): void {
+  const settingsPath = getGlobalPiSettingsPath();
+  const dir = path.dirname(settingsPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  let current: Record<string, unknown> = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      current = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+    } catch {
+      current = {};
+    }
+  }
+
+  const picordSettings = (current.picord && typeof current.picord === "object" && !Array.isArray(current.picord))
+    ? current.picord as Record<string, unknown>
+    : {};
+
+  picordSettings.openaiCodexLoginMethod = method;
+  picordSettings.openaiCodexLoginFlow = "browser-url-paste";
+  current.picord = picordSettings;
+
+  fs.writeFileSync(settingsPath, `${JSON.stringify(current, null, 2)}\n`, "utf8");
 }
 
 interface PendingOAuthLogin {
@@ -129,6 +161,12 @@ export class PiSessionPool {
     ]);
     for (const root of roots) {
       await this.ensureWorkspaceLoadedByRoot(root);
+    }
+
+    for (const workspace of this.registry.list()) {
+      if (!workspace.outsideWorkspaceAccess) continue;
+      this.approvals.setOutsideWorkspaceAllowed(`managed:${workspace.channelId}`, true);
+      this.approvals.setOutsideWorkspaceAllowed(workspace.channelId, true);
     }
   }
 
@@ -173,6 +211,8 @@ export class PiSessionPool {
   }
 
   async startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
+    persistOpenAICodexLoginPreference("headless");
+
     if (this.pendingOAuthLogins.has(userId)) {
       throw new Error("An OpenAI Codex login is already in progress.");
     }
@@ -259,6 +299,18 @@ export class PiSessionPool {
     return this.approvals.getPendingRequests(workspaceKey);
   }
 
+  isOutsideWorkspaceAllowed(workspaceKey: string): boolean {
+    const workspaceChannelId = workspaceKey.split(":").pop() ?? workspaceKey;
+    return this.approvals.isOutsideWorkspaceAllowed(workspaceKey)
+      || this.registry.isOutsideWorkspaceAllowed(workspaceChannelId);
+  }
+
+  setOutsideWorkspaceAllowed(workspaceKey: string, allowed: boolean): void {
+    const workspaceChannelId = workspaceKey.split(":").pop() ?? workspaceKey;
+    this.approvals.setOutsideWorkspaceAllowed(workspaceKey, allowed);
+    this.registry.setOutsideWorkspaceAllowed(workspaceChannelId, allowed);
+  }
+
   getManagedWorkspaceChannelIds(): string[] {
     return this.registry.getChannelIds();
   }
@@ -271,6 +323,11 @@ export class PiSessionPool {
     const summary = this.registry.upsert(channelId, path.resolve(root), name);
     const workspaceKey = `managed:${channelId}`;
     await this.ensureWorkspaceLoadedByRoot(summary.root, workspaceKey);
+    if (summary.outsideWorkspaceAccess) {
+      this.approvals.setOutsideWorkspaceAllowed(workspaceKey, true);
+      this.approvals.setOutsideWorkspaceAllowed(channelId, true);
+      this.approvals.setOutsideWorkspaceAllowed(`discord:guild:workspace:${channelId}`, true);
+    }
     return summary;
   }
 
@@ -383,6 +440,7 @@ export class PiSessionPool {
         : undefined;
 
       const chunks: string[] = [];
+      const toolArgsByCallId = new Map<string, unknown>();
       let notifyQueue = Promise.resolve();
       const enqueueUpdate = (update: PiLiveUpdate) => {
         if (!this.notifyLiveUpdate) return;
@@ -393,15 +451,40 @@ export class PiSessionPool {
           });
       };
 
+      const enqueueRunState = () => {
+        const model = handle.session.model;
+        const contextUsage = handle.session.getContextUsage();
+        enqueueUpdate({
+          type: "run_state",
+          modelReference: model ? `${model.provider}/${model.id}` : undefined,
+          thinkingLevel: handle.session.thinkingLevel,
+          contextUsage: contextUsage
+            ? {
+                tokens: contextUsage.tokens,
+                contextWindow: contextUsage.contextWindow,
+                percent: contextUsage.percent,
+              }
+            : undefined,
+        });
+      };
+
+      enqueueRunState();
+
       const unsubscribe = handle.session.subscribe((event) => {
-        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-          const delta = event.assistantMessageEvent.delta;
-          chunks.push(delta);
-          enqueueUpdate({ type: "assistant_delta", delta });
+        if (event.type === "message_update") {
+          if (event.assistantMessageEvent.type === "text_delta") {
+            const delta = event.assistantMessageEvent.delta;
+            chunks.push(delta);
+            enqueueUpdate({ type: "assistant_delta", delta });
+            return;
+          }
+
+          enqueueRunState();
           return;
         }
 
         if (event.type === "tool_execution_start") {
+          toolArgsByCallId.set(event.toolCallId, event.args);
           enqueueUpdate({
             type: "tool_start",
             toolCallId: event.toolCallId,
@@ -411,18 +494,43 @@ export class PiSessionPool {
           return;
         }
 
+        if (event.type === "tool_execution_update") {
+          const startedArgs = toolArgsByCallId.get(event.toolCallId);
+          enqueueUpdate({
+            type: "tool_update",
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args ?? startedArgs,
+            detail: event.partialResult?.details ?? event.partialResult?.content ?? event.partialResult,
+          });
+          return;
+        }
+
         if (event.type === "tool_execution_end") {
+          const startedArgs = toolArgsByCallId.get(event.toolCallId);
+          toolArgsByCallId.delete(event.toolCallId);
           enqueueUpdate({
             type: "tool_end",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             isError: event.isError,
+            args: startedArgs,
+            detail: event.result?.details ?? event.result?.content,
+          });
+          return;
+        }
+
+        if (event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "error") {
+          enqueueUpdate({
+            type: "assistant_delta",
+            delta: `\n\n❌ Provider error: ${event.message.errorMessage ?? "Unknown provider error."}`,
           });
         }
       });
 
       try {
         await handle.session.prompt(options.promptText);
+        enqueueRunState();
         await notifyQueue;
       } finally {
         unsubscribe();
@@ -457,6 +565,7 @@ export class PiSessionPool {
     sessionName: string;
     skillName: string;
     args?: string;
+    runId?: number;
   }): Promise<string> {
     const promptText = options.args?.trim()
       ? `/skill:${options.skillName} ${options.args.trim()}`
@@ -467,6 +576,7 @@ export class PiSessionPool {
       workspaceKey: options.workspaceKey,
       sessionName: options.sessionName,
       promptText,
+      runId: options.runId,
     });
   }
 
