@@ -451,7 +451,10 @@ export function createRotatingStreamWrapper(
 	accountManager: AccountManager,
 	baseProvider: ApiProviderRef,
 	baseProvidersByApi: ReadonlyMap<Api, ApiProviderRef> = new Map(),
-	streamTimeoutConfig: StreamTimeoutConfig = DEFAULT_STREAM_TIMEOUT_CONFIG,
+	options?: {
+		streamTimeouts?: StreamTimeoutConfig;
+		onRotate?: (oldId: string, newId: string, providerId: string, trigger: string | null) => void;
+	},
 ): (
 	model: Model<Api>,
 	context: Context,
@@ -460,7 +463,7 @@ export function createRotatingStreamWrapper(
 	return (
 		model: Model<Api>,
 		context: Context,
-		options?: SimpleStreamOptions,
+		streamOptions?: SimpleStreamOptions,
 	): AssistantMessageEventStream => {
 		const stream = createAssistantMessageEventStream();
 		let activeProviderId = resolveCredentialProviderId(model, fallbackProvider);
@@ -509,6 +512,8 @@ export function createRotatingStreamWrapper(
 					chainId: target.chainId,
 					position: target.position,
 				});
+
+				const oldProviderId = activeProviderId;
 				activeProviderId = target.providerId;
 				activeModel = {
 					...activeModel,
@@ -518,10 +523,16 @@ export function createRotatingStreamWrapper(
 				};
 				activeBaseProvider = failoverBaseProvider;
 				excludedCredentialIds = new Set<string>();
+				const failTriggerStr = lastFailoverTrigger ? ` (${lastFailoverTrigger})` : "";
+				options?.onRotate?.(oldProviderId, target.providerId, "provider", lastFailoverTrigger);
+
 				lastRetryableMessage = null;
 				lastFailoverTrigger = null;
 				return true;
 			};
+
+			let previousCredentialId: string | null = null;
+			let previousProviderId: string | null = null;
 
 			for (let attempt = 0; attempt <= MAX_ROTATION_RETRIES; attempt += 1) {
 				let selected;
@@ -531,6 +542,14 @@ export function createRotatingStreamWrapper(
 						modelId: activeModel.id,
 						selectionCache,
 					});
+
+					if (attempt > 0 && previousCredentialId && (previousCredentialId !== selected.credentialId || previousProviderId !== activeProviderId)) {
+					  const oldId = `...${previousCredentialId.slice(-6)}`;
+					  const newId = `...${selected.credentialId.slice(-6)}`;
+					  options?.onRotate?.(oldId, newId, activeProviderId, lastFailoverTrigger);
+					}
+					previousCredentialId = selected.credentialId;
+					previousProviderId = activeProviderId;
 				} catch (error: unknown) {
 					if (excludedCredentialIds.size > 0 && (await switchToFailoverProvider())) {
 						continue;
@@ -674,8 +693,8 @@ export function createRotatingStreamWrapper(
 						providerId: activeProviderId,
 						credentialId: selected.credentialId,
 						modelId: activeModel.id,
-						timeoutConfig: streamTimeoutConfig,
-						parentSignal: options?.signal,
+						timeoutConfig: options?.streamTimeouts ?? DEFAULT_STREAM_TIMEOUT_CONFIG,
+						parentSignal: streamOptions?.signal,
 					});
 					let innerStream: AssistantMessageEventStream;
 					try {
@@ -802,7 +821,7 @@ export function createRotatingStreamWrapper(
 					}
 
 					if (!sawDoneEvent) {
-						if (options?.signal?.aborted && !watchdog.getTimeoutError()) {
+						if (streamOptions?.signal?.aborted && !watchdog.getTimeoutError()) {
 							stream.end();
 							return;
 						}
@@ -875,6 +894,7 @@ export async function registerMultiAuthProviders(
 		excludeProviders?: string[];
 		includeProviders?: string[];
 		streamTimeouts?: StreamTimeoutConfig;
+		onRotate?: (oldId: string, newId: string, providerId: string, trigger: string | null) => void;
 	},
 ): Promise<void> {
 	const excludeSet = new Set(options?.excludeProviders ?? []);
@@ -967,7 +987,7 @@ export async function registerMultiAuthProviders(
 			accountManager,
 			baseProvider,
 			baseProvidersByApi,
-			options?.streamTimeouts,
+			options,
 		);
 		wrappersByApi.set(api, streamSimple);
 		multiAuthDebugLogger.log("stream_wrapper_created", {

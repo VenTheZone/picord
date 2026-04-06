@@ -241,6 +241,10 @@ export async function startDiscordPortExtensionRuntime({
           try {
             await registerMultiAuthProviders(pi, multiAuthAccountManager, {
               excludeProviders: config.multiAuth?.excludeProviders,
+              onRotate: (oldId, newId, providerId, trigger) => {
+                const failStr = trigger ? ` (${trigger})` : "";
+                notify(`🔄 Rotating credential/provider for ${providerId}: ${oldId} ➔ ${newId}${failStr}`, "info");
+              },
             });
           } catch (err) {
             notify(`multi-auth provider registration warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
