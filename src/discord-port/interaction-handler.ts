@@ -641,7 +641,6 @@ export function registerDiscordPortInteractionHandler({
     if (interaction.isButton() && interaction.customId.startsWith(ACCESS_BUTTON_PREFIX)) {
       try {
         requireOwner(interaction as never, runtime);
-        requireHostChannel(interaction as never, runtime);
 
         const [, mode, requestId] = interaction.customId.split(":");
         if (!requestId || !mode || !["once", "always", "deny"].includes(mode)) {
