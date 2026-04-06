@@ -3,6 +3,7 @@ import { ChannelType, Events, type Client, type Guild } from "discord.js";
 import { loadRuntimeConfig } from "../config.js";
 import { type LiveDiscordRunRenderer, type PiLiveUpdate } from "../live-discord-renderer.js";
 import { PiSessionPool } from "../pi-session.js";
+import { clearRestartNotification, readRestartNotification } from "../restart-notification.js";
 import { RuntimeLock } from "../runtime-lock.js";
 import { sendTextResponse } from "./message-helpers.js";
 import { PiSessionPoolAdapter } from "./pi-runtime-adapter.js";
@@ -140,7 +141,14 @@ export async function startDiscordPortExtensionRuntime({
     await entry.renderer.onUpdate(update);
   };
 
-  const sessionPool = new PiSessionPool(config, async (conversationKey, content) => {
+  const notifyAccessRequest = async (conversationKey: string, content: string): Promise<void> => {
+    const entry = liveRenderers.get(conversationKey);
+    const requestId = content.match(/Request ID:\s*(acc-\d+)/)?.[1] || content.match(/Access request\s+(acc-\d+)/)?.[1];
+    if (entry) {
+      await entry.renderer.showAccessRequest(content, requestId);
+      return;
+    }
+
     const channelId = getChannelIdFromConversationKey(conversationKey);
     if (!channelId || !client) {
       notify(`discord-port could not deliver conversation notice for ${conversationKey}`, "warning");
@@ -160,7 +168,9 @@ export async function startDiscordPortExtensionRuntime({
         "warning",
       );
     }
-  }, notifyConversation);
+  };
+
+  const sessionPool = new PiSessionPool(config, notifyAccessRequest, notifyConversation);
   await sessionPool.initialize();
   const adapter = new PiSessionPoolAdapter(config, sessionPool, liveRenderers);
 
@@ -207,6 +217,26 @@ export async function startDiscordPortExtensionRuntime({
         for (const hostMessage of hostMessages) {
           notify(hostMessage, hostMessage.includes("unresolved") ? "warning" : "info");
         }
+
+        const restartNotification = readRestartNotification(config.statePath);
+        if (restartNotification) {
+          try {
+            const channel = await createdClient.channels.fetch(restartNotification.channelId);
+            if (!channel || !("send" in channel)) {
+              throw new Error(`Channel ${restartNotification.channelId} is unavailable`);
+            }
+
+            await sendTextResponse(
+              channel,
+              restartNotification.requestedByTag
+                ? `✅ Picord is back online. Restart requested by ${restartNotification.requestedByTag}.`
+                : "✅ Picord is back online.",
+            );
+            clearRestartNotification(config.statePath);
+          } catch (error) {
+            notify(`discord-port could not deliver restart notification: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          }
+        }
       } catch (error) {
         notify(`discord-port command registration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
@@ -222,7 +252,7 @@ export async function startDiscordPortExtensionRuntime({
       client: createdClient,
       enableMessageContent,
       onReload: () => {
-        pi.sendUserMessage("/reload", { deliverAs: "followUp" });
+        pi.sendUserMessage("/picord-reload", { deliverAs: "followUp" });
       },
       onWarning: (message) => notify(message, "warning"),
       onError: (message) => notify(message, "error"),

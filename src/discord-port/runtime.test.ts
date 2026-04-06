@@ -37,6 +37,7 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
       critiqueAutoShare: false,
       systemPromptAppend: "",
       isActive: true,
+      multiAuth: {},
       ...overrides.config,
     },
     isOwner: () => true,
@@ -67,10 +68,14 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
     completeOpenAICodexLogin: async () => undefined,
     registerLiveRenderer: () => undefined,
     clearLiveRenderer: () => undefined,
+    restartRuntime: async () => undefined,
+    restartSession: async () => false,
     respond: async () => "Done.",
     invokeSkill: async () => "Done.",
     listSkillSummaries: () => [],
     getPendingAccessRequests: () => [],
+    isOutsideWorkspaceAllowed: () => false,
+    setOutsideWorkspaceAllowed: () => undefined,
     resolveAccessRequest: () => undefined,
     abort: async () => false,
     reset: async () => false,
@@ -114,6 +119,7 @@ describe("DiscordPortRuntime", () => {
           critiqueAutoShare: false,
           systemPromptAppend: "",
           isActive: true,
+          multiAuth: {},
         },
         listManagedProjects: () => [{ channelId: "123", root: path.join(baseDir, "beta"), name: "beta" }],
       }),
@@ -141,5 +147,24 @@ describe("DiscordPortRuntime", () => {
     expect(status).toContain("activeModel: openai-codex/gpt-5.4");
     expect(status).toContain("activeThinkingLevel: high");
     expect(status).toContain("workspaceRoot: /workspace/demo");
+    expect(status).toContain("outsideWorkspaceAccess: disabled");
+  });
+
+  it("shows a warning in status output when outside-workspace access is enabled", () => {
+    const runtime = new DiscordPortRuntime(
+      {} as never,
+      createAdapter({
+        getWorkspaceInfo: () => ({ root: "/workspace/demo" }),
+        getEffectiveModel: () => ({ provider: "openai-codex", id: "gpt-5.4" }),
+        getEffectiveThinkingLevel: () => "high",
+        isManagedProjectChannel: () => true,
+        isOutsideWorkspaceAllowed: () => true,
+      }),
+    );
+
+    const status = runtime.buildProjectChannelStatus({ guildId: "guild-1", channelId: "channel-1" });
+
+    expect(status).toContain("outsideWorkspaceAccess: ENABLED");
+    expect(status).toContain("riskLevel: elevated");
   });
 });

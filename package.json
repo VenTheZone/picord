@@ -35,8 +35,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --ext .ts",
     "test": "vitest --run",
-    "check": "npm run typecheck && npm run test",
+    "check": "npm run lint && npm run typecheck && npm run test",
     "doctor": "npm run build && node dist/doctor.js",
     "doctor:discord-port": "PICORD_RUNTIME_ARCH=discord-port npm run doctor",
     "doctor:legacy": "PICORD_RUNTIME_ARCH=legacy npm run doctor",
@@ -56,17 +57,24 @@
     ]
   },
   "dependencies": {
-    "discord.js": "^14.19.3"
+    "discord.js": "^14.19.3",
+    "proper-lockfile": "^4.1.2"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
   },
   "devDependencies": {
+    "@eslint/js": "^9.24.0",
     "@mariozechner/pi-coding-agent": "^0.64.0",
     "@sinclair/typebox": "^0.34.41",
     "@types/node": "^24.3.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "@typescript-eslint/eslint-plugin": "^8.30.1",
+    "@typescript-eslint/parser": "^8.30.1",
+    "eslint": "^9.24.0",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.30.1",
     "vitest": "^3.2.4"
   },
   "engines": {

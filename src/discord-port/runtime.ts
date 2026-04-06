@@ -212,6 +212,12 @@ export class DiscordPortRuntime {
       `workspaceScopedModels: ${workspaceScope.models.length}`,
       `workspaceScopePatterns: ${workspaceScope.patterns.join(", ") || "(none)"}`,
       `blockedPathPatterns: ${this.adapter.getBlockedPathPatterns().join(", ") || "(none)"}`,
+      this.adapter.isOutsideWorkspaceAllowed(workspaceKey)
+        ? `outsideWorkspaceAccess: ENABLED`
+        : `outsideWorkspaceAccess: disabled`,
+      this.adapter.isOutsideWorkspaceAllowed(workspaceKey)
+        ? `riskLevel: elevated (outside-workspace access enabled for this project)`
+        : undefined,
       `skills: ${this.adapter.getSkillSummaries().length}`,
       `ownerConfigured: ${Boolean(this.adapter.config.ownerUserId)}`,
       `hostChannelId: ${this.adapter.config.hostChannelId ?? "(unresolved)"}`,

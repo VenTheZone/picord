@@ -17,6 +17,7 @@ const RESERVED_COMMAND_NAMES = new Set([
   "think",
   "login",
   "reload",
+  "restart",
   "project-create",
   "add-project",
   "add-project-path",
@@ -25,8 +26,7 @@ const RESERVED_COMMAND_NAMES = new Set([
   "diff",
   "review",
   "access-requests",
-  "access-allow",
-  "access-deny",
+  "outside-workspace-access",
 ]);
 
 function truncateDescription(description: string): string {
@@ -126,7 +126,14 @@ function buildLoginCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
 function buildReloadCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("reload")
-    .setDescription("Reload picord runtime")
+    .setDescription("Restart the current session so new config and tools apply on the next message")
+    .toJSON();
+}
+
+function buildRestartCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("restart")
+    .setDescription("Restart the tmux-managed picord runtime and notify this channel when it returns")
     .toJSON();
 }
 
@@ -263,37 +270,18 @@ function buildAccessRequestsCommand(): RESTPostAPIChatInputApplicationCommandsJS
     .toJSON();
 }
 
-function buildAccessAllowCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+function buildOutsideWorkspaceAccessCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
-    .setName("access-allow")
-    .setDescription("Approve a pending access request")
-    .addStringOption((option) =>
-      option
-        .setName("request_id")
-        .setDescription("Pending access request ID")
-        .setRequired(true),
-    )
+    .setName("outside-workspace-access")
+    .setDescription("Allow or deny AI access outside the current project workspace")
     .addStringOption((option) =>
       option
         .setName("mode")
-        .setDescription("Approve once or permanently")
+        .setDescription("Allow or deny access outside the current project workspace")
         .addChoices(
-          { name: "once", value: "once" },
-          { name: "always", value: "always" },
+          { name: "allow", value: "allow" },
+          { name: "deny", value: "deny" },
         )
-        .setRequired(true),
-    )
-    .toJSON();
-}
-
-function buildAccessDenyCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder()
-    .setName("access-deny")
-    .setDescription("Deny a pending access request")
-    .addStringOption((option) =>
-      option
-        .setName("request_id")
-        .setDescription("Pending access request ID")
         .setRequired(true),
     )
     .toJSON();
@@ -315,6 +303,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildThinkCommand(),
     buildLoginCommand(),
     buildReloadCommand(),
+    buildRestartCommand(),
     buildProjectCreateCommand(),
     buildAddProjectCommand(),
     buildAddProjectPathCommand(),
@@ -329,8 +318,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildDiffCommand(),
     buildReviewCommand(),
     buildAccessRequestsCommand(),
-    buildAccessAllowCommand(),
-    buildAccessDenyCommand(),
+    buildOutsideWorkspaceAccessCommand(),
     buildStatusCommand(),
     ...skills.map(buildSkillCommand).filter((command): command is RESTPostAPIChatInputApplicationCommandsJSONBody => Boolean(command)),
   ];

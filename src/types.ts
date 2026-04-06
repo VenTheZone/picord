@@ -1,5 +1,33 @@
 export type ToolMode = "read-only" | "coding";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type MultiAuthRotationMode = "round-robin" | "usage-based" | "balancer";
+
+export interface MultiAuthPicordConfig {
+  enabled?: boolean;
+  debug?: boolean;
+  excludeProviders?: string[];
+  streamTimeouts?: {
+    attemptTimeoutMs?: number;
+    idleTimeoutMs?: number;
+  };
+  oauthRefresh?: {
+    enabled?: boolean;
+    safetyWindowMs?: number;
+    checkIntervalMs?: number;
+    maxConcurrentRefreshes?: number;
+  };
+  health?: {
+    windowSize?: number;
+    maxLatencyMs?: number;
+    enabled?: boolean;
+  };
+  cascade?: {
+    initialBackoffMs?: number;
+    maxBackoffMs?: number;
+    backoffMultiplier?: number;
+    enabled?: boolean;
+  };
+}
 
 export interface PicordFileConfig {
   allowDm?: boolean;
@@ -23,6 +51,7 @@ export interface PicordFileConfig {
   modelId?: string;
   critiqueAutoShare?: boolean;
   systemPromptAppend?: string;
+  multiAuth?: MultiAuthPicordConfig;
 }
 
 export interface PicordRuntimeConfig extends PicordFileConfig {
@@ -49,6 +78,7 @@ export interface PicordRuntimeConfig extends PicordFileConfig {
   thinkingLevel: ThinkingLevel;
   critiqueAutoShare: boolean;
   systemPromptAppend: string;
+  multiAuth: MultiAuthPicordConfig;
 }
 
 export interface GuildAccessInput {

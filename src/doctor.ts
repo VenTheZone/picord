@@ -1,5 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import path from "node:path";
+import { statSync } from "node:fs";
 import { loadRuntimeConfig } from "./config.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 

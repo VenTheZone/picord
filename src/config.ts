@@ -136,5 +136,6 @@ export function loadRuntimeConfig(
     critiqueAutoShare: normalizeBoolean(fileConfig.critiqueAutoShare, false),
     systemPromptAppend:
       typeof fileConfig.systemPromptAppend === "string" ? fileConfig.systemPromptAppend.trim() : "",
+    multiAuth: fileConfig.multiAuth && typeof fileConfig.multiAuth === "object" ? fileConfig.multiAuth : {},
   };
 }

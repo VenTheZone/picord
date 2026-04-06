@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -21,7 +21,7 @@ function toRelativeDisplay(root: string, absolutePath: string): string {
 export function createSafeCustomTools(
   guard: WorkspaceGuard,
   context: AccessContext,
-): ToolDefinition<any, any>[] {
+): ToolDefinition[] {
   const lsTool = {
     name: "ls",
     label: "ls",
@@ -63,7 +63,7 @@ export function createSafeCustomTools(
         details: { entryCount: rendered.length },
       };
     },
-  } satisfies ToolDefinition<any, any>;
+  } satisfies ToolDefinition;
 
   const findTool = {
     name: "find",
@@ -95,7 +95,7 @@ export function createSafeCustomTools(
         details: { matchCount: matches.length },
       };
     },
-  } satisfies ToolDefinition<any, any>;
+  } satisfies ToolDefinition;
 
   const grepTool = {
     name: "grep",
@@ -165,7 +165,7 @@ export function createSafeCustomTools(
         details: { matchCount: matches.length },
       };
     },
-  } satisfies ToolDefinition<any, any>;
+  } satisfies ToolDefinition;
 
   return [lsTool, findTool, grepTool];
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { ownerAdminCommandRequiresHostChannel } from "./interaction-handler.js";
 
 function resolveModelCommandBehavior({
-  commandName,
   inHostChannel,
   inThread,
   inGuild,
@@ -40,7 +40,7 @@ function resolveLoginSelectionBehavior({
   method: "api-key" | "oauth";
 }) {
   if (providerId === "openai-codex") {
-    return { action: "start-openai-codex-login", nextStep: "openai-code-modal" } as const;
+    return { action: "start-openai-codex-login", nextStep: "openai-code-buttons" } as const;
   }
   return {
     action: method === "api-key" ? "show-api-key-modal" : "start-oauth-login",
@@ -49,6 +49,14 @@ function resolveLoginSelectionBehavior({
 }
 
 describe("interaction command logic", () => {
+  it("allows session reloads, runtime restarts, and outside-workspace toggles outside the host channel while keeping other admin commands pinned", () => {
+    expect(ownerAdminCommandRequiresHostChannel("reload")).toBe(false);
+    expect(ownerAdminCommandRequiresHostChannel("restart")).toBe(false);
+    expect(ownerAdminCommandRequiresHostChannel("add-project-path", "current-channel")).toBe(false);
+    expect(ownerAdminCommandRequiresHostChannel("outside-workspace-access")).toBe(false);
+    expect(ownerAdminCommandRequiresHostChannel("project-create")).toBe(true);
+  });
+
   it("treats /model exactly like /use-model across locations", () => {
     const cases = [
       { inHostChannel: true, inThread: false, inGuild: true, expected: { action: "blocked", scope: "host" } },
@@ -80,7 +88,7 @@ describe("interaction command logic", () => {
   it("routes /login provider choices to the correct next step", () => {
     expect(resolveLoginSelectionBehavior({ providerId: "openai-codex", method: "oauth" })).toEqual({
       action: "start-openai-codex-login",
-      nextStep: "openai-code-modal",
+      nextStep: "openai-code-buttons",
     });
 
     expect(resolveLoginSelectionBehavior({ providerId: "openrouter", method: "api-key" })).toEqual({

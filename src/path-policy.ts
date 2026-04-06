@@ -235,6 +235,10 @@ export class WorkspaceGuard {
     const displayPath = insideWorkspace ? relative || "." : targetForCheck;
 
     if (!insideWorkspace) {
+      if (this.approvals.isOutsideWorkspaceAllowed(context.workspaceKey)) {
+        return;
+      }
+
       await this.approvals.request({
         conversationKey: context.conversationKey,
         workspaceKey: context.workspaceKey,

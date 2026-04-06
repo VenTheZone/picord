@@ -3,9 +3,11 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  EmbedBuilder,
   Events,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -17,8 +19,8 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
-import type { ApprovalDecisionMode } from "../access-approval.js";
-import { LiveDiscordRunRenderer, createInteractionLiveMessageTarget } from "../live-discord-renderer.js";
+
+import { LiveDiscordRunRenderer, chunkDiscordMarkdown, createInteractionLiveMessageTarget, normalizeDiscordText } from "../live-discord-renderer.js";
 import {
   buildEffectiveAccessConfig,
   extractMemberRoleIds,
@@ -36,6 +38,89 @@ const LOGIN_OPENAI_COMPLETE = "login:openai:complete";
 const LOGIN_API_KEY_MODAL_PREFIX = "login:api-key:";
 const LOGIN_OPENAI_MODAL = "login:openai:modal";
 const SESSION_SELECT = "session:select";
+const ACCESS_BUTTON_PREFIX = "access:";
+const OUTSIDE_WORKSPACE_PROJECT_SELECT = "outside-workspace:project-select";
+const OUTSIDE_WORKSPACE_BUTTON_PREFIX = "outside-workspace:toggle:";
+
+function truncateEmbedFieldValue(value: string, maxLength = 1024): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+}
+
+export function extractDeviceCodeFromInstructions(instructions?: string): string | undefined {
+  if (!instructions) return undefined;
+
+  const patterns = [
+    /enter\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
+    /one-time\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
+    /device\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
+    /code\s*[:\-]\s*([A-Z0-9-]{4,})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = instructions.match(pattern);
+    const code = match?.[1]?.trim();
+    if (code) return code;
+  }
+
+  return undefined;
+}
+
+export function buildOpenAICodexLoginEmbed({
+  providerName,
+  verificationUrl,
+  instructions,
+}: {
+  providerName: string;
+  verificationUrl: string;
+  instructions?: string;
+}): EmbedBuilder {
+  const deviceCode = extractDeviceCodeFromInstructions(instructions);
+  const embed = new EmbedBuilder()
+    .setTitle("OpenAI Codex Login")
+    .setColor(deviceCode ? 0x5865f2 : 0xf59e0b)
+    .setDescription(deviceCode
+      ? `Provider: **${providerName}**\nA visible device code was detected, so Discord can show it without acting like a confused toaster.`
+      : `Provider: **${providerName}**\nThis provider uses a localhost browser callback in your **local browser**, not on the VPS. So yes, the browser gets dramatic and you paste the final redirected URL back into Discord.`)
+    .addFields(
+      {
+        name: "Verification page",
+        value: `[Open verification page](${verificationUrl})\n<${verificationUrl}>`,
+        inline: false,
+      },
+      {
+        name: "Device code",
+        value: deviceCode ? `\`${deviceCode}\`` : "No device code exists for this login attempt.",
+        inline: true,
+      },
+      {
+        name: "Next step",
+        value: deviceCode
+          ? "Finish the browser step, then click **Complete login** and paste the device code or redirected callback URL."
+          : "Finish the browser step on your own computer. When your local browser lands on `http://localhost:1455/auth/callback?...`, copy the full URL from the address bar and paste it into **Complete login**. If you can clearly see the `code=` value, pasting just that code also works.",
+        inline: false,
+      },
+    )
+    .setTimestamp();
+
+  if (!deviceCode) {
+    embed.addFields({
+      name: "Expected redirect",
+      value: "`http://localhost:1455/auth/callback?code=...&state=...`\nThis redirect appears in your local browser, not on the VPS. If the page fails to load, that is annoying but expected. Copy the full URL anyway.",
+      inline: false,
+    });
+  }
+
+  if (instructions?.trim()) {
+    embed.addFields({
+      name: "Provider instructions",
+      value: truncateEmbedFieldValue(instructions.trim()),
+      inline: false,
+    });
+  }
+
+  return embed;
+}
+
 
 function requireGuild(interaction: ChatInputCommandInteraction): asserts interaction is ChatInputCommandInteraction & { guildId: string } {
   if (!interaction.guildId) {
@@ -64,6 +149,18 @@ function requireOwner(interaction: ChatInputCommandInteraction, runtime: Discord
   }
 }
 
+function requireOwnerOrAdmin(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): void {
+  if (runtime.adapter.isOwner(interaction.user.id)) {
+    return;
+  }
+
+  if (interaction.guildId && interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return;
+  }
+
+  throw new Error("Only the configured owner or a Discord administrator can use this command.");
+}
+
 function isHostControlChannel(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): boolean {
   if (runtime.adapter.config.hostChannelId) {
     return interaction.channelId === runtime.adapter.config.hostChannelId;
@@ -88,6 +185,7 @@ function requireHostChannel(interaction: ChatInputCommandInteraction, runtime: D
 function isOwnerAdminCommand(commandName: string): boolean {
   return [
     "reload",
+    "restart",
     "login",
     "project-create",
     "add-project",
@@ -95,10 +193,17 @@ function isOwnerAdminCommand(commandName: string): boolean {
     "project-list",
     "project-list-available",
     "session",
-    "access-requests",
-    "access-allow",
-    "access-deny",
+        "access-requests",
+    "outside-workspace-access",
   ].includes(commandName);
+}
+
+export function ownerAdminCommandRequiresHostChannel(commandName: string, addProjectMode?: string): boolean {
+  if (["outside-workspace-access", "reload", "restart"].includes(commandName)) {
+    return false;
+  }
+
+  return !(commandName === "add-project-path" && addProjectMode === "current-channel");
 }
 
 function findSkillCommand(commandName: string, runtime: DiscordPortRuntime) {
@@ -192,6 +297,25 @@ export function buildLoginProviderLines(providers: Array<{
   return [
     "Choose a provider to log in or update.",
     ...providers.slice(0, 25).map((provider) => `- ${provider.name} (${provider.method}${provider.hasStoredAuth ? ", configured" : ", not configured"})`),
+  ];
+}
+
+export function buildAccessRequestLines(request: { id: string; summary: string }): string[] {
+  return [
+    "Permission request",
+    `Request ID: ${request.id}`,
+    `Requested action: ${request.summary}`,
+    "Use the buttons below to approve or deny.",
+  ];
+}
+
+function buildOutsideWorkspaceToggleLines(project: { channelId: string; name?: string }, enabled: boolean): string[] {
+  return [
+    `Project: <#${project.channelId}>${project.name ? ` (${project.name})` : ""}`,
+    `Outside-workspace access: ${enabled ? "ENABLED" : "disabled"}`,
+    enabled
+      ? "Blocked sensitive paths still remain protected."
+      : "Enable only if you want AI to access files outside this project workspace.",
   ];
 }
 
@@ -357,20 +481,26 @@ export function registerDiscordPortInteractionHandler({
 
         if (provider.id === "openai-codex") {
           const started = await runtime.adapter.startOpenAICodexLogin(interaction.user.id);
-          const button = new ButtonBuilder()
-            .setCustomId(LOGIN_OPENAI_COMPLETE)
-            .setLabel("Paste login code")
-            .setStyle(ButtonStyle.Primary);
+
+          const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setStyle(ButtonStyle.Link)
+              .setLabel("Open verification page")
+              .setURL(started.url),
+            new ButtonBuilder()
+              .setCustomId(LOGIN_OPENAI_COMPLETE)
+              .setLabel("Complete login")
+              .setStyle(ButtonStyle.Primary),
+          );
 
           await interaction.update({
-            content: [
-              `OpenAI Codex device login started for **${provider.name}**.`,
-              `Open this verification page on another device/browser: ${started.url}`,
-              started.instructions ?? "Enter the one-time code shown by OpenAI.",
-              "Picord is polling automatically in the background.",
-              "Use the button below only if OpenAI falls back to manual browser completion and asks you to paste a code or redirect URL.",
-            ].join("\n\n"),
-            components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button)],
+            content: "OpenAI Codex login ready. Use the buttons below.",
+            embeds: [buildOpenAICodexLoginEmbed({
+              providerName: provider.name,
+              verificationUrl: started.url,
+              instructions: started.instructions,
+            })],
+            components: [buttons],
           });
           return;
         }
@@ -388,6 +518,44 @@ export function registerDiscordPortInteractionHandler({
             ),
           );
         await interaction.showModal(modal);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        } else {
+          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        }
+      }
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === OUTSIDE_WORKSPACE_PROJECT_SELECT) {
+      try {
+        requireOwner(interaction as never, runtime);
+        requireHostChannel(interaction as never, runtime);
+
+        const channelId = interaction.values[0]?.trim();
+        if (!channelId) throw new Error("No project was selected.");
+        const project = runtime.adapter.listManagedProjects().find((entry) => entry.channelId === channelId);
+        if (!project) throw new Error("Selected project no longer exists.");
+
+        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, channelId);
+        const enabled = runtime.adapter.isOutsideWorkspaceAllowed(workspaceKey);
+        const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}allow:${channelId}`)
+            .setLabel("Enable")
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}deny:${channelId}`)
+            .setLabel("Disable")
+            .setStyle(ButtonStyle.Secondary),
+        );
+
+        await interaction.update({
+          content: buildOutsideWorkspaceToggleLines(project, enabled).join("\n"),
+          components: [buttons],
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
@@ -470,6 +638,69 @@ export function registerDiscordPortInteractionHandler({
       return;
     }
 
+    if (interaction.isButton() && interaction.customId.startsWith(ACCESS_BUTTON_PREFIX)) {
+      try {
+        requireOwner(interaction as never, runtime);
+        requireHostChannel(interaction as never, runtime);
+
+        const [, mode, requestId] = interaction.customId.split(":");
+        if (!requestId || !mode || !["once", "always", "deny"].includes(mode)) {
+          throw new Error("Invalid access request action.");
+        }
+
+        const request = runtime.adapter.resolveAccessRequest(requestId, mode as "once" | "always" | "deny");
+        await interaction.update({
+          content: request ? `Resolved ${requestId}: ${mode}.` : `No pending access request with id ${requestId}.`,
+          components: [],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        } else {
+          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        }
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(OUTSIDE_WORKSPACE_BUTTON_PREFIX)) {
+      try {
+        requireOwner(interaction as never, runtime);
+        const [, , mode, channelId] = interaction.customId.split(":");
+        if (!channelId || !mode || !["allow", "deny"].includes(mode)) {
+          throw new Error("Invalid outside-workspace action.");
+        }
+
+        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, channelId);
+        const allowed = mode === "allow";
+        runtime.adapter.setOutsideWorkspaceAllowed(workspaceKey, allowed);
+        const project = runtime.adapter.listManagedProjects().find((entry) => entry.channelId === channelId) ?? { channelId };
+
+        await interaction.update({
+          content: buildOutsideWorkspaceToggleLines(project, allowed).join("\n"),
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}allow:${channelId}`)
+              .setLabel("Enable")
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}deny:${channelId}`)
+              .setLabel("Disable")
+              .setStyle(ButtonStyle.Secondary),
+          )],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        } else {
+          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        }
+      }
+      return;
+    }
+
     if (interaction.isButton() && interaction.customId === LOGIN_OPENAI_COMPLETE) {
       try {
         requireOwner(interaction as never, runtime);
@@ -481,7 +712,8 @@ export function registerDiscordPortInteractionHandler({
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId("code")
-                .setLabel("Authorization code or redirect URL")
+                .setLabel("Paste the final local-browser redirect URL")
+                .setPlaceholder("http://localhost:1455/auth/callback?code=...&state=... or just the code")
                 .setStyle(TextInputStyle.Paragraph)
                 .setRequired(true),
             ),
@@ -563,10 +795,13 @@ export function registerDiscordPortInteractionHandler({
       const ownerAdminCommand = isOwnerAdminCommand(interaction.commandName);
 
       if (interaction.guildId && ownerAdminCommand) {
-        requireOwner(interaction, runtime);
-        const isCurrentChannelBind = interaction.commandName === "add-project-path"
-          && interaction.options.getString("mode") === "current-channel";
-        if (!isCurrentChannelBind) {
+        if (["reload", "restart"].includes(interaction.commandName)) {
+          requireOwnerOrAdmin(interaction, runtime);
+        } else {
+          requireOwner(interaction, runtime);
+        }
+
+        if (ownerAdminCommandRequiresHostChannel(interaction.commandName, interaction.options.getString("mode") ?? undefined)) {
           requireHostChannel(interaction, runtime);
         }
       }
@@ -581,12 +816,64 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "reload") {
-        requireGuild(interaction);
+        if (!interaction.guildId) {
+          requireOwner(interaction, runtime);
+        }
+
+        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        const workspaceKey = runtime.getWorkspaceKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+
+        if (interaction.guildId && !thread && !runtime.adapter.isManagedProjectChannel(interaction.channelId)) {
+          throw new Error("Use /reload in a managed project channel, a session thread, or a DM.");
+        }
+
+        const restarted = await runtime.adapter.restartSession(conversationKey, workspaceKey);
+        const visibleNotice = restarted
+          ? "✅ Session restarted here. New config/tools will apply on the next message."
+          : "✅ No bound session was active here, so the next message will already start fresh with the latest config/tools.";
+
         await interaction.reply({
-          content: "Queued pi /reload.",
+          content: "Session reload complete. I will post confirmation in this location too.",
           flags: MessageFlags.Ephemeral,
         });
-        onReload?.();
+
+        if (interaction.channel && "send" in interaction.channel) {
+          try {
+            await interaction.channel.send({
+              content: visibleNotice,
+              allowedMentions: { parse: [] },
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await interaction.followUp({
+              content: `Session reload succeeded, but I could not post the visible confirmation here: ${message}`,
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => undefined);
+          }
+        }
+        return;
+      }
+
+      if (interaction.commandName === "restart") {
+        requireGuild(interaction);
+        await interaction.reply({
+          content: "Queued picord restart. I will notify this channel once Picord is back online.",
+          flags: MessageFlags.Ephemeral,
+        });
+        await runtime.adapter.restartRuntime({
+          notifyChannelId: interaction.channelId,
+          requestedByUserId: interaction.user.id,
+          requestedByTag: interaction.user.tag,
+        });
         return;
       }
 
@@ -1061,24 +1348,55 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
-      if (interaction.commandName === "access-allow") {
+      if (interaction.commandName === "outside-workspace-access") {
         requireGuild(interaction);
-        const requestId = interaction.options.getString("request_id", true);
-        const mode = interaction.options.getString("mode", true) as ApprovalDecisionMode;
-        const request = runtime.adapter.resolveAccessRequest(requestId, mode);
-        await interaction.reply({
-          content: request ? `Approved ${requestId} (${mode}).` : `No pending access request with id ${requestId}.`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
+        const mode = interaction.options.getString("mode", true);
 
-      if (interaction.commandName === "access-deny") {
-        requireGuild(interaction);
-        const requestId = interaction.options.getString("request_id", true);
-        const request = runtime.adapter.resolveAccessRequest(requestId, "deny");
+        if (isHostControlChannel(interaction, runtime)) {
+          const projects = runtime.adapter.listManagedProjects().slice(0, 25);
+          if (projects.length === 0) {
+            await interaction.reply({
+              content: "No managed projects are available.",
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          const menu = new StringSelectMenuBuilder()
+            .setCustomId(OUTSIDE_WORKSPACE_PROJECT_SELECT)
+            .setPlaceholder(`Select a project to ${mode} outside-workspace access`)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(...projects.map((project) => ({
+              label: (project.name?.trim() || project.channelId).slice(0, 100),
+              value: project.channelId,
+              description: `${runtime.adapter.isOutsideWorkspaceAllowed(runtime.buildWorkspaceKey(interaction.guildId!, project.channelId)) ? "enabled" : "disabled"} • ${project.root}`.slice(0, 100),
+            })));
+
+          await interaction.reply({
+            content: `Choose a project to ${mode} outside-workspace access.`,
+            flags: MessageFlags.Ephemeral,
+            components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+          });
+          return;
+        }
+
+        const channel = interaction.channel;
+        const workspaceChannelId = channel?.isThread() ? (channel.parentId ?? interaction.channelId) : interaction.channelId;
+        if (!runtime.adapter.isManagedProjectChannel(workspaceChannelId)) {
+          throw new Error("Use this command in the host control channel, a managed project channel, or a session thread.");
+        }
+
+        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, workspaceChannelId);
+        const allowed = mode === "allow";
+        runtime.adapter.setOutsideWorkspaceAllowed(workspaceKey, allowed);
         await interaction.reply({
-          content: request ? `Denied ${requestId}.` : `No pending access request with id ${requestId}.`,
+          content: allowed
+            ? [
+                `Outside-workspace access is now enabled for <#${workspaceChannelId}>.`,
+                `Blocked sensitive paths still remain protected.`,
+              ].join("\n")
+            : `Outside-workspace access is now disabled for <#${workspaceChannelId}>.`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1118,6 +1436,7 @@ export function registerDiscordPortInteractionHandler({
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+        renderer.setSkillContext(skillCommand.name, skillArgs);
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
         try {
           const response = await runtime.adapter.invokeSkill({

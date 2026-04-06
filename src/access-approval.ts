@@ -14,6 +14,7 @@ export interface AccessRequest {
   summary: string;
   fingerprint: string;
   createdAt: number;
+  sessionKey: string;
 }
 
 interface PendingRequest {
@@ -21,10 +22,25 @@ interface PendingRequest {
   resolve: (allowed: boolean) => void;
 }
 
+function getOutsideWorkspaceAliases(workspaceKey: string): string[] {
+  const normalized = workspaceKey.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const channelId = normalized.split(":").pop() ?? normalized;
+  return [...new Set([
+    normalized,
+    channelId,
+    `managed:${channelId}`,
+  ])];
+}
+
 export class AccessApprovalManager {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly alwaysAllowed = new Set<string>();
   private readonly alwaysDenied = new Set<string>();
+  private readonly outsideWorkspaceAllowed = new Set<string>();
   private requestCounter = 0;
 
   constructor(
@@ -41,6 +57,21 @@ export class AccessApprovalManager {
       .map((entry) => entry.request)
       .filter((request) => !workspaceKey || request.workspaceKey === workspaceKey)
       .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  isOutsideWorkspaceAllowed(workspaceKey: string): boolean {
+    return getOutsideWorkspaceAliases(workspaceKey)
+      .some((alias) => this.outsideWorkspaceAllowed.has(alias));
+  }
+
+  setOutsideWorkspaceAllowed(workspaceKey: string, allowed: boolean): void {
+    for (const alias of getOutsideWorkspaceAliases(workspaceKey)) {
+      if (allowed) {
+        this.outsideWorkspaceAllowed.add(alias);
+        continue;
+      }
+      this.outsideWorkspaceAllowed.delete(alias);
+    }
   }
 
   async request(input: AccessRequestInput): Promise<void> {
@@ -66,6 +97,7 @@ export class AccessApprovalManager {
       summary: input.summary,
       fingerprint: input.fingerprint,
       createdAt: Date.now(),
+      sessionKey: `${input.workspaceKey}:${input.fingerprint}`,
     };
 
     const promise = new Promise<void>((resolve, reject) => {
@@ -81,9 +113,10 @@ export class AccessApprovalManager {
     await this.notify(
       input.conversationKey,
       [
-        `Access request ${id}`,
-        input.summary,
-        `Owner can respond with /access-allow request_id:${id} mode:once|always or /access-deny request_id:${id}`,
+        "Permission request",
+        `Request ID: ${id}`,
+        `Requested action: ${input.summary}`,
+        "Use the buttons below to approve or deny.",
       ].join("\n"),
     );
 

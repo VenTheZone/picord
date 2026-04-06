@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildGroupedSessionLines, buildLoginProviderLines } from "./interaction-handler.js";
+import {
+  buildAccessRequestLines,
+  buildGroupedSessionLines,
+  buildLoginProviderLines,
+  buildOpenAICodexLoginEmbed,
+  extractDeviceCodeFromInstructions,
+} from "./interaction-handler.js";
 
 describe("interaction-handler helpers", () => {
   it("groups /session lines by project and preserves useful metadata", () => {
@@ -53,4 +59,51 @@ describe("interaction-handler helpers", () => {
       "- OpenRouter (api-key, not configured)",
     ]);
   });
+
+  it("builds a clearer access request prompt", () => {
+    const lines = buildAccessRequestLines({
+      id: "acc-1",
+      summary: "Read files outside workspace: /tmp/shared-config",
+    });
+
+    expect(lines[0]).toBe("Permission request");
+    expect(lines).toContain("Request ID: acc-1");
+    expect(lines).toContain("Requested action: Read files outside workspace: /tmp/shared-config");
+    expect(lines).toContain("Use the buttons below to approve or deny.");
+  });
+
+  it("extracts a visible device code from oauth instructions when present", () => {
+    expect(extractDeviceCodeFromInstructions("Enter code: ABCD-EFGH")).toBe("ABCD-EFGH");
+    expect(extractDeviceCodeFromInstructions("One-time code: WXYZ1234")).toBe("WXYZ1234");
+    expect(extractDeviceCodeFromInstructions("Open the page and continue in browser.")).toBeUndefined();
+  });
+
+  it("builds an OpenAI login embed with the detected device code when available", () => {
+    const embed = buildOpenAICodexLoginEmbed({
+      providerName: "ChatGPT Plus/Pro (Codex Subscription)",
+      verificationUrl: "https://example.com/verify",
+      instructions: "Open the page, then enter code: ABCD-EFGH",
+    }).toJSON();
+
+    expect(embed.title).toBe("OpenAI Codex Login");
+    expect(embed.description).toContain("device code was detected");
+    expect(embed.fields?.some((field) => field.name === "Device code" && field.value.includes("ABCD-EFGH"))).toBe(true);
+    expect(embed.fields?.some((field) => field.name === "Provider instructions" && field.value.includes("enter code: ABCD-EFGH"))).toBe(true);
+  });
+
+  it("builds an OpenAI login embed that explains the localhost callback fallback when no device code exists", () => {
+    const embed = buildOpenAICodexLoginEmbed({
+      providerName: "ChatGPT Plus/Pro (Codex Subscription)",
+      verificationUrl: "https://example.com/verify",
+      instructions: "Open the page and continue in browser.",
+    }).toJSON();
+
+    expect(embed.description).toContain("local browser");
+    expect(embed.description).toContain("not on the VPS");
+    expect(embed.fields?.some((field) => field.name === "Device code" && field.value.includes("No device code exists"))).toBe(true);
+    expect(embed.fields?.some((field) => field.name === "Expected redirect" && field.value.includes("not on the VPS"))).toBe(true);
+    expect(embed.fields?.some((field) => field.name === "Next step" && field.value.includes("on your own computer"))).toBe(true);
+    expect(embed.fields?.some((field) => field.name === "Next step" && field.value.includes("pasting just that code also works"))).toBe(true);
+  });
+
 });

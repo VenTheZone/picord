@@ -19,6 +19,16 @@ import { canAccessDm, canAccessGuild } from "./auth.js";
 import { toDiscordChunks } from "./conversation.js";
 import { loadRuntimeConfig } from "./config.js";
 import discordPortExtension from "./discord-port/entrypoint.js";
+import { buildAllMultiAuthCommands, handleMultiAuthCommand } from "./discord-port/multi-auth-commands.js";
+import {
+  AccountManager,
+  registerGlobalKeyDistributor,
+  unregisterGlobalKeyDistributor,
+  registerMultiAuthProviders,
+  initMultiAuthConfig,
+  multiAuthDebugLogger,
+  RESOLVE_EXT_DEBUG_DIR,
+} from "./discord-port/multi-auth-integration.js";
 import { LiveDiscordRunRenderer, createChannelLiveMessageTarget, createInteractionLiveMessageTarget, type PiLiveUpdate } from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
@@ -38,8 +48,14 @@ const RESERVED_COMMAND_NAMES = new Set([
   "project-create",
   "project-list",
   "access-requests",
-  "access-allow",
-  "access-deny",
+  "multi-auth",
+  "multi-auth-add-apikey",
+  "multi-auth-delete",
+  "multi-auth-switch",
+  "multi-auth-auto",
+  "multi-auth-rename",
+  "multi-auth-rotation",
+  "multi-auth-hide",
 ]);
 
 const OWNER_ADMIN_COMMAND_NAMES = new Set([
@@ -47,8 +63,6 @@ const OWNER_ADMIN_COMMAND_NAMES = new Set([
   "project-create",
   "project-list",
   "access-requests",
-  "access-allow",
-  "access-deny",
 ]);
 
 const PICORD_CATEGORY_NAME = "Picord";
@@ -156,36 +170,6 @@ function buildAccessRequestsCommand(): RESTPostAPIChatInputApplicationCommandsJS
     .toJSON();
 }
 
-function buildAccessAllowCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder()
-    .setName("access-allow")
-    .setDescription("Approve a pending access request")
-    .addStringOption((option) =>
-      option.setName("request_id").setDescription("Access request id, e.g. acc-1").setRequired(true),
-    )
-    .addStringOption((option) =>
-      option
-        .setName("mode")
-        .setDescription("Approve once or remember for this runtime")
-        .setRequired(true)
-        .addChoices(
-          { name: "once", value: "once" },
-          { name: "always", value: "always" },
-        ),
-    )
-    .toJSON();
-}
-
-function buildAccessDenyCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder()
-    .setName("access-deny")
-    .setDescription("Deny a pending access request")
-    .addStringOption((option) =>
-      option.setName("request_id").setDescription("Access request id, e.g. acc-1").setRequired(true),
-    )
-    .toJSON();
-}
-
 function buildSkillCommand(skill: SkillSummary): RESTPostAPIChatInputApplicationCommandsJSONBody | undefined {
   if (RESERVED_COMMAND_NAMES.has(skill.name)) return undefined;
   if (!/^[a-z0-9-]{1,32}$/.test(skill.name)) return undefined;
@@ -213,8 +197,7 @@ function buildSlashCommands(skills: SkillSummary[]): RESTPostAPIChatInputApplica
     buildProjectCreateCommand(),
     buildProjectListCommand(),
     buildAccessRequestsCommand(),
-    buildAccessAllowCommand(),
-    buildAccessDenyCommand(),
+    ...buildAllMultiAuthCommands(),
   ];
 
   const skillCommands = skills.map(buildSkillCommand).filter(Boolean) as RESTPostAPIChatInputApplicationCommandsJSONBody[];
@@ -538,15 +521,6 @@ async function replyToMessage(message: Message, content: string): Promise<void> 
   }
 }
 
-async function replyToInteraction(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
-  const chunks = toDiscordChunks(content);
-  const [firstChunk, ...remainingChunks] = chunks;
-  await interaction.editReply(firstChunk || "Done.");
-  for (const chunk of remainingChunks) {
-    await interaction.followUp({ content: chunk, allowedMentions: { parse: [] } });
-  }
-}
-
 function buildStatusMessage(
   config: PicordRuntimeConfig,
   sessionPool: PiSessionPool,
@@ -615,6 +589,14 @@ function isSkillCommand(commandName: string, sessionPool: PiSessionPool): SkillS
 }
 
 export default function picordExtension(pi: ExtensionAPI) {
+  pi.registerCommand("picord-reload", {
+    description: "Reload the picord Discord extension",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify("Reloading picord...", "info");
+      await ctx.reload();
+    },
+  });
+
   if (resolveRuntimeArch(process.env) === "discord-port") {
     return discordPortExtension(pi);
   }
@@ -624,6 +606,8 @@ export default function picordExtension(pi: ExtensionAPI) {
   let sessionPool: PiSessionPool | undefined;
   let runtimeLock: RuntimeLock | undefined;
   let slashOnlyMode = false;
+  let multiAuthAccountManager: AccountManager | undefined;
+  let multiAuthWarmupCompleted = false;
   const liveRenderers = new Map<string, { renderer: LiveDiscordRunRenderer; runId?: number }>();
   const conversationNoticeTargets = new Map<string, (content: string) => Promise<void>>();
   const hostControlChannels = new Map<string, string>();
@@ -636,6 +620,13 @@ export default function picordExtension(pi: ExtensionAPI) {
   }
 
   async function notifyAccessRequest(conversationKey: string, content: string): Promise<void> {
+    const entry = liveRenderers.get(conversationKey);
+    const requestId = content.match(/Request ID:\s*(acc-\d+)/)?.[1] || content.match(/Access request\s+(acc-\d+)/)?.[1];
+    if (entry) {
+      await entry.renderer.showAccessRequest(content, requestId);
+      return;
+    }
+
     const target = conversationNoticeTargets.get(conversationKey);
     if (!target) return;
     await target(content);
@@ -946,8 +937,8 @@ export default function picordExtension(pi: ExtensionAPI) {
         await interaction.reply({ content: "Only the configured owner can reload picord.", ephemeral: true });
         return;
       }
-      await interaction.reply({ content: "Queued pi /reload.", ephemeral: true });
-      pi.sendUserMessage("/reload", { deliverAs: "followUp" });
+      await interaction.reply({ content: "Reloading picord...", ephemeral: true });
+      pi.sendUserMessage("/picord-reload", { deliverAs: "followUp" });
       return;
     }
 
@@ -1037,37 +1028,6 @@ export default function picordExtension(pi: ExtensionAPI) {
       return;
     }
 
-    if (interaction.commandName === "access-allow") {
-      if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can approve access requests.", ephemeral: true });
-        return;
-      }
-      const requestId = interaction.options.getString("request_id", true);
-      const mode = interaction.options.getString("mode", true) as "once" | "always";
-      const request = sessionPool.resolveAccessRequest(requestId, mode);
-      await interaction.reply({
-        content: request
-          ? `Approved ${requestId} with mode ${mode}.`
-          : `No pending access request with id ${requestId}.`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (interaction.commandName === "access-deny") {
-      if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can deny access requests.", ephemeral: true });
-        return;
-      }
-      const requestId = interaction.options.getString("request_id", true);
-      const request = sessionPool.resolveAccessRequest(requestId, "deny");
-      await interaction.reply({
-        content: request ? `Denied ${requestId}.` : `No pending access request with id ${requestId}.`,
-        ephemeral: true,
-      });
-      return;
-    }
-
     if (interaction.commandName === "abort") {
       const threadRequirement = requireThreadForSessionCommand(interaction);
       if (threadRequirement) {
@@ -1114,6 +1074,16 @@ export default function picordExtension(pi: ExtensionAPI) {
         content: reset ? "Session reset." : "No active session to reset.",
         ephemeral,
       });
+      return;
+    }
+
+    // Delegate multi-auth commands
+    if (interaction.commandName && interaction.commandName.startsWith("multi-auth")) {
+      if (!multiAuthAccountManager) {
+        await interaction.reply({ content: "Multi-auth credentials are not configured.", ephemeral });
+        return;
+      }
+      await handleMultiAuthCommand(interaction, multiAuthAccountManager);
       return;
     }
 
@@ -1174,7 +1144,7 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
   }
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     if (client) return;
 
     config = loadRuntimeConfig(ctx.cwd);
@@ -1220,6 +1190,9 @@ export default function picordExtension(pi: ExtensionAPI) {
 
         const modeLabel = enableMessageContent ? "full mode" : "slash-only mode";
         ctx.ui.notify(`picord connected as ${discordClient.user?.tag ?? "Discord bot"} (${modeLabel})`, "info");
+        if ((event as { reason?: string }).reason === "reload") {
+          ctx.ui.notify("picord reload complete.", "info");
+        }
       });
 
       if (enableMessageContent) {
@@ -1274,6 +1247,47 @@ export default function picordExtension(pi: ExtensionAPI) {
       sessionPool = new PiSessionPool(runtimeConfig, notifyAccessRequest, notifyConversation);
       await sessionPool.initialize();
 
+      // Initialize multi-auth: wrap API providers with credential rotation
+      const stateDir = path.dirname(runtimeConfig.statePath);
+      initMultiAuthConfig(runtimeConfig.statePath, stateDir);
+
+      if (config.multiAuth?.enabled !== false) {
+        const { buildMultiAuthExtensionConfig } = await import("./multi-auth/picord-config-adapter.js");
+        const maConfig = buildMultiAuthExtensionConfig(config.multiAuth ?? {});
+
+        multiAuthAccountManager = new AccountManager(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          maConfig,
+        );
+
+        const keyDistributor = multiAuthAccountManager.getKeyDistributor();
+        registerGlobalKeyDistributor(keyDistributor);
+
+        await registerMultiAuthProviders(pi, multiAuthAccountManager, {
+          excludeProviders: maConfig.excludeProviders,
+          streamTimeouts: maConfig.streamTimeouts,
+        }).catch((err) => {
+          ctx.ui.notify(`multi-auth provider registration warning: ${err.message}`, "warning");
+        });
+
+        // Warm up: auto-activate preferred credentials
+        await multiAuthAccountManager.ensureInitialized();
+        await multiAuthAccountManager.autoActivatePreferredCredentials({ avoidUsageApi: true }).catch((err) => {
+          ctx.ui.notify(`multi-auth warmup warning: ${err.message}`, "warning");
+        });
+        multiAuthWarmupCompleted = true;
+
+        if (maConfig.debug) {
+          multiAuthDebugLogger.initialize(true);
+        }
+
+        ctx.ui.notify("multi-auth credentials loaded.", "info");
+      }
+
       client = createDiscordClient(true);
       attachClientHandlers(client, true);
 
@@ -1309,6 +1323,11 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
       hostControlChannels.clear();
       conversationNoticeTargets.clear();
+      if (multiAuthAccountManager) {
+        unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
+        multiAuthAccountManager.shutdown();
+        multiAuthAccountManager = undefined;
+      }
       if (runtimeLock) {
         runtimeLock.release();
         runtimeLock = undefined;
@@ -1331,6 +1350,11 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     liveRenderers.clear();
     conversationNoticeTargets.clear();
+    if (multiAuthAccountManager) {
+      unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
+      multiAuthAccountManager.shutdown();
+      multiAuthAccountManager = undefined;
+    }
     hostControlChannels.clear();
     if (runtimeLock) {
       runtimeLock.release();

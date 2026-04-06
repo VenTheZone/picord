@@ -1,5 +1,9 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { homedir } from "node:os";
 import type { ApprovalDecisionMode } from "../access-approval.js";
 import type { LiveDiscordRunRenderer } from "../live-discord-renderer.js";
+import { writeRestartNotification } from "../restart-notification.js";
 
 interface RegisteredLiveRenderer {
   renderer: LiveDiscordRunRenderer;
@@ -142,8 +146,39 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.getSkillSummaries();
   }
 
+  async restartRuntime(options?: { notifyChannelId?: string; requestedByUserId?: string; requestedByTag?: string }): Promise<void> {
+    if (options?.notifyChannelId && options.requestedByUserId) {
+      writeRestartNotification(this.config.statePath, {
+        channelId: options.notifyChannelId,
+        requestedByUserId: options.requestedByUserId,
+        requestedByTag: options.requestedByTag,
+        requestedAt: new Date().toISOString(),
+      });
+    }
+
+    const home = homedir();
+    const startScript = path.join(home, ".picord", "picord-start.sh");
+    const syncScript = path.join(home, ".picord", "picord-sync.sh");
+    const logFile = path.join(home, ".picord", "picord-restart.log");
+    const command = `sleep 2; tmux kill-session -t picord 2>/dev/null || true; ${syncScript} >> ${logFile} 2>&1; tmux new-session -d -s picord '${startScript}'`;
+    const child = spawn("bash", ["-lc", `nohup bash -lc ${JSON.stringify(command)} >> ${JSON.stringify(logFile)} 2>&1 &`], {
+      detached: true,
+      stdio: "ignore",
+      cwd: this.config.cwd,
+    });
+    child.unref();
+  }
+
   getPendingAccessRequests(workspaceKey?: string) {
     return this.sessionPool.getPendingAccessRequests(workspaceKey);
+  }
+
+  isOutsideWorkspaceAllowed(workspaceKey: string): boolean {
+    return this.sessionPool.isOutsideWorkspaceAllowed(workspaceKey);
+  }
+
+  setOutsideWorkspaceAllowed(workspaceKey: string, allowed: boolean): void {
+    this.sessionPool.setOutsideWorkspaceAllowed(workspaceKey, allowed);
   }
 
   resolveAccessRequest(requestId: string, mode: ApprovalDecisionMode) {
@@ -156,6 +191,10 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
 
   reset(conversationKey: string): Promise<boolean> {
     return this.sessionPool.reset(conversationKey);
+  }
+
+  restartSession(conversationKey: string, workspaceKey: string): Promise<boolean> {
+    return this.sessionPool.restartSession(conversationKey, workspaceKey);
   }
 
   async resumeSession(options: {
@@ -189,6 +228,7 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     sessionName: string;
     skillName: string;
     args?: string;
+    runId?: number;
   }): Promise<string> {
     return this.sessionPool.invokeSkill(options);
   }

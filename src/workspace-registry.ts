@@ -2,8 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 interface WorkspaceStateFile {
-  version: 2;
-  workspaces: Record<string, { root: string; name?: string }>;
+  version: 3;
+  workspaces: Record<string, { root: string; name?: string; outsideWorkspaceAccess?: boolean }>;
   sessions: Record<string, { sessionFile: string; workspaceKey: string }>;
 }
 
@@ -11,10 +11,11 @@ export interface ManagedWorkspaceSummary {
   channelId: string;
   root: string;
   name?: string;
+  outsideWorkspaceAccess?: boolean;
 }
 
 const EMPTY_STATE: WorkspaceStateFile = {
-  version: 2,
+  version: 3,
   workspaces: {},
   sessions: {},
 };
@@ -32,7 +33,7 @@ export class WorkspaceRegistry {
 
     const parsed = JSON.parse(readFileSync(this.statePath, "utf8")) as Partial<WorkspaceStateFile>;
     this.state = {
-      version: 2,
+      version: 3,
       workspaces: parsed.workspaces ?? {},
       sessions: parsed.sessions ?? {},
     };
@@ -40,7 +41,12 @@ export class WorkspaceRegistry {
 
   list(): ManagedWorkspaceSummary[] {
     return Object.entries(this.state.workspaces)
-      .map(([channelId, entry]) => ({ channelId, root: entry.root, name: entry.name }))
+      .map(([channelId, entry]) => ({
+        channelId,
+        root: entry.root,
+        name: entry.name,
+        outsideWorkspaceAccess: entry.outsideWorkspaceAccess,
+      }))
       .sort((a, b) => a.channelId.localeCompare(b.channelId));
   }
 
@@ -67,10 +73,31 @@ export class WorkspaceRegistry {
     this.save();
   }
 
-  upsert(channelId: string, root: string, name?: string): ManagedWorkspaceSummary {
-    this.state.workspaces[channelId] = { root, name };
+  isOutsideWorkspaceAllowed(channelId: string): boolean {
+    return Boolean(this.state.workspaces[channelId]?.outsideWorkspaceAccess);
+  }
+
+  setOutsideWorkspaceAllowed(channelId: string, allowed: boolean): void {
+    const existing = this.state.workspaces[channelId];
+    if (!existing) return;
+    this.state.workspaces[channelId] = { ...existing, outsideWorkspaceAccess: allowed };
     this.save();
-    return { channelId, root, name };
+  }
+
+  upsert(channelId: string, root: string, name?: string): ManagedWorkspaceSummary {
+    const existing = this.state.workspaces[channelId];
+    this.state.workspaces[channelId] = {
+      root,
+      name,
+      outsideWorkspaceAccess: existing?.outsideWorkspaceAccess,
+    };
+    this.save();
+    return {
+      channelId,
+      root,
+      name,
+      outsideWorkspaceAccess: existing?.outsideWorkspaceAccess,
+    };
   }
 
   private save(): void {

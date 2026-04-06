@@ -21,6 +21,7 @@ import type { PiLiveUpdate } from "./live-discord-renderer.js";
 import { AccessApprovalManager } from "./access-approval.js";
 import type { AccessContext } from "./path-policy.js";
 import { WorkspaceGuard } from "./path-policy.js";
+import { createDiscordExtensionBindings, notifyExtensionBindingFailure } from "./extension-bindings.js";
 import { filterOutPicordExtensions } from "./pi-resource-loader.js";
 import { createSafeCustomTools } from "./safe-tools.js";
 import type {
@@ -165,7 +166,6 @@ export class PiSessionPool {
 
     for (const workspace of this.registry.list()) {
       if (!workspace.outsideWorkspaceAccess) continue;
-      this.approvals.setOutsideWorkspaceAllowed(`managed:${workspace.channelId}`, true);
       this.approvals.setOutsideWorkspaceAllowed(workspace.channelId, true);
     }
   }
@@ -325,8 +325,6 @@ export class PiSessionPool {
     await this.ensureWorkspaceLoadedByRoot(summary.root, workspaceKey);
     if (summary.outsideWorkspaceAccess) {
       this.approvals.setOutsideWorkspaceAllowed(workspaceKey, true);
-      this.approvals.setOutsideWorkspaceAllowed(channelId, true);
-      this.approvals.setOutsideWorkspaceAllowed(`discord:guild:workspace:${channelId}`, true);
     }
     return summary;
   }
@@ -589,6 +587,21 @@ export class PiSessionPool {
       this.sessions.delete(conversationKey);
       this.registry.deleteSessionFile(conversationKey);
       return true;
+    });
+  }
+
+  async restartSession(conversationKey: string, workspaceKey: string): Promise<boolean> {
+    return this.runExclusive(conversationKey, async () => {
+      const handle = this.sessions.get(conversationKey);
+      if (handle) {
+        await handle.session.abort().catch(() => undefined);
+        handle.session.dispose();
+        this.sessions.delete(conversationKey);
+        this.registry.deleteSessionFile(conversationKey);
+      }
+
+      this.workspaces.delete(workspaceKey);
+      return Boolean(handle);
     });
   }
 
@@ -883,6 +896,30 @@ export class PiSessionPool {
       sessionManager,
       settingsManager: workspaceState.settingsManager,
     });
+
+    try {
+      await session.bindExtensions(createDiscordExtensionBindings({
+        conversationKey: options.conversationKey,
+        notifyLiveUpdate: this.notifyLiveUpdate,
+        onLog: (level, message) => {
+          const label = level.toUpperCase();
+          console[level === "info" ? "info" : level === "warning" ? "warn" : "error"](
+            `[picord extensions:${options.conversationKey}] ${label}: ${message}`,
+          );
+        },
+      }));
+    } catch (error) {
+      await notifyExtensionBindingFailure({
+        conversationKey: options.conversationKey,
+        notifyLiveUpdate: this.notifyLiveUpdate,
+        onLog: (level, message) => {
+          const label = level.toUpperCase();
+          console[level === "info" ? "info" : level === "warning" ? "warn" : "error"](
+            `[picord extensions:${options.conversationKey}] ${label}: ${message}`,
+          );
+        },
+      }, error);
+    }
 
     const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
     if (!hasExistingSession) {

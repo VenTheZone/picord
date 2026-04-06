@@ -74,6 +74,8 @@ export interface DiscordPortRuntimeAdapter {
   completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void>;
   registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void;
   clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void;
+  restartRuntime(options?: { notifyChannelId?: string; requestedByUserId?: string; requestedByTag?: string }): Promise<void>;
+  restartSession(conversationKey: string, workspaceKey: string): Promise<boolean>;
   respond(options: {
     conversationKey: string;
     workspaceKey: string;
@@ -87,10 +89,12 @@ export interface DiscordPortRuntimeAdapter {
     sessionName: string;
     skillName: string;
     args?: string;
+    runId?: number;
   }): Promise<string>;
   listSkillSummaries(): SkillSummary[];
   getPendingAccessRequests(workspaceKey?: string): AccessRequest[];
-  getPendingAccessRequests(workspaceKey?: string): AccessRequest[];
+  isOutsideWorkspaceAllowed(workspaceKey: string): boolean;
+  setOutsideWorkspaceAllowed(workspaceKey: string, allowed: boolean): void;
   resolveAccessRequest(requestId: string, mode: ApprovalDecisionMode): AccessRequest | undefined;
   abort(conversationKey: string): Promise<boolean>;
   reset(conversationKey: string): Promise<boolean>;

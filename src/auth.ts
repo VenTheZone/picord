@@ -39,10 +39,17 @@ export function canAccessGuild(
     return { allowed: true };
   }
 
-  if (config.allowedRoleIds.length === 0) {
+  const hasRoleRestrictions = config.allowedRoleIds.length > 0;
+  const hasUserRestrictions = config.allowedUserIds.length > 0;
+
+  if (!hasRoleRestrictions && !hasUserRestrictions) {
+    return { allowed: true };
+  }
+
+  if (!hasRoleRestrictions) {
     return {
       allowed: false,
-      reason: "Guild access is disabled until at least one allowedRoleId is configured.",
+      reason: "You are not allowlisted to use this bot in this server.",
     };
   }
 
