@@ -8,7 +8,15 @@ import { RuntimeLock } from "../runtime-lock.js";
 import { sendTextResponse } from "./message-helpers.js";
 import { PiSessionPoolAdapter } from "./pi-runtime-adapter.js";
 import { buildDiscordPortCommands } from "./command-registration.js";
+import { buildAllMultiAuthCommands } from "./multi-auth-commands.js";
 import { createDiscordPortClient, startDiscordPortBot } from "./discord-bot.js";
+import {
+  AccountManager,
+  registerMultiAuthProviders,
+  unregisterGlobalKeyDistributor,
+} from "./multi-auth-integration.js";
+import { buildMultiAuthExtensionConfig } from "../multi-auth/picord-config-adapter.js";
+import { multiAuthDebugLogger } from "../multi-auth/debug-logger.js";
 
 export interface DiscordPortBridgeHandle {
   client?: Client;
@@ -176,10 +184,15 @@ export async function startDiscordPortExtensionRuntime({
 
   let slashOnlyMode = false;
   let cleanedUp = false;
+  let multiAuthAccountManager: AccountManager | undefined;
 
   const registerCommands = async (discordClient: Client) => {
     if (!config.registerCommands || !discordClient.application) return;
-    const commands = buildDiscordPortCommands(adapter.listSkillSummaries());
+    const skillSummaries = adapter.listSkillSummaries();
+    const commands = [
+      ...buildDiscordPortCommands(skillSummaries),
+      ...buildAllMultiAuthCommands(),
+    ];
     if (config.allowedGuildIds.length > 0) {
       await Promise.all(config.allowedGuildIds.map((guildId) => discordClient.application!.commands.set(commands, guildId)));
       return;
@@ -198,6 +211,15 @@ export async function startDiscordPortExtensionRuntime({
       client = undefined;
     }
     await sessionPool.dispose();
+    if (multiAuthAccountManager) {
+      try {
+        unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
+        multiAuthAccountManager.shutdown();
+      } catch (err) {
+        notify(`multi-auth shutdown warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+      }
+      multiAuthAccountManager = undefined;
+    }
     lockResult.lock.release();
     if (reason) {
       notify(reason, "info");
@@ -210,6 +232,27 @@ export async function startDiscordPortExtensionRuntime({
       try {
         const createdRoles = await ensureAllowedRolesExist(config, createdClient);
         const hostMessages = await refreshHostControlChannels(config, createdClient);
+
+        // Initialize multi-auth for Codex rotation and usage tracking
+        if (config.multiAuth?.enabled !== false) {
+          const maConfig = buildMultiAuthExtensionConfig(config.multiAuth ?? {});
+          multiAuthAccountManager = new AccountManager(undefined, undefined, undefined, undefined, undefined, maConfig);
+          const keyDistributor = multiAuthAccountManager.getKeyDistributor();
+          try {
+            await registerMultiAuthProviders(pi, multiAuthAccountManager, {
+              excludeProviders: config.multiAuth?.excludeProviders,
+            });
+          } catch (err) {
+            notify(`multi-auth provider registration warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+          }
+          await multiAuthAccountManager.ensureInitialized();
+          await multiAuthAccountManager.autoActivatePreferredCredentials({ avoidUsageApi: true }).catch((err) => {
+            notify(`multi-auth warmup warning: ${err.message}`, "warning");
+          });
+          multiAuthDebugLogger.initialize(true);
+          notify("multi-auth credentials loaded.", "info");
+        }
+
         await registerCommands(createdClient);
         if (createdRoles.length > 0) {
           notify(`picord auto-created roles: ${createdRoles.join(", ")}`, "info");
@@ -256,6 +299,7 @@ export async function startDiscordPortExtensionRuntime({
       },
       onWarning: (message) => notify(message, "warning"),
       onError: (message) => notify(message, "error"),
+      multiAuthAccountManager,
     });
     client = started.client;
   };

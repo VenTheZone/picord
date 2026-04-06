@@ -28,6 +28,8 @@ import {
 } from "./access-control.js";
 import { isGitWorkspace, reviewGitDiff, shareGitDiff } from "../critique.js";
 import { buildPromptFromInteraction, replyToInteraction } from "./message-helpers.js";
+import { handleMultiAuthCommand } from "./multi-auth-commands.js";
+import type { AccountManager } from "./multi-auth-integration.js";
 import type { DiscordPortRuntime } from "./runtime.js";
 
 const SCOPE_MODELS_APPLY_PREFIX = "scope-models:apply:";
@@ -378,10 +380,12 @@ export function registerDiscordPortInteractionHandler({
   client,
   runtime,
   onReload,
+  multiAuthAccountManager,
 }: {
   client: Client;
   runtime: DiscordPortRuntime;
   onReload?: () => void;
+  multiAuthAccountManager?: AccountManager;
 }) {
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     if (interaction.isAutocomplete()) {
@@ -1409,6 +1413,11 @@ export function registerDiscordPortInteractionHandler({
             : runtime.buildGuildStatus({ guildId: interaction.guildId, channelId: interaction.channelId });
 
         await replyToInteraction(interaction, content);
+        return;
+      }
+
+      if (interaction.commandName.startsWith("multi-auth") && multiAuthAccountManager) {
+        await handleMultiAuthCommand(interaction, multiAuthAccountManager);
         return;
       }
 

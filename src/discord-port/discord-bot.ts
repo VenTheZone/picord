@@ -14,6 +14,7 @@ import { buildPromptFromMessage, replyToMessage } from "./message-helpers.js";
 import { registerDiscordPortInteractionHandler } from "./interaction-handler.js";
 import { DiscordPortRuntime } from "./runtime.js";
 import type { DiscordPortRuntimeAdapter } from "./types.js";
+import type { AccountManager } from "./multi-auth-integration.js";
 
 function isThreadChannel(channel: Message["channel"]): boolean {
   return channel.type === ChannelType.PublicThread || channel.type === ChannelType.PrivateThread;
@@ -70,6 +71,7 @@ export function registerDiscordPortBot({
   onInfo,
   onWarning,
   onError,
+  multiAuthAccountManager,
 }: {
   client: Client;
   runtime: DiscordPortRuntime;
@@ -78,8 +80,9 @@ export function registerDiscordPortBot({
   onInfo?: (message: string) => void;
   onWarning?: (message: string) => void;
   onError?: (message: string) => void;
+  multiAuthAccountManager?: AccountManager;
 }) {
-  registerDiscordPortInteractionHandler({ client, runtime, onReload });
+  registerDiscordPortInteractionHandler({ client, runtime, onReload, multiAuthAccountManager });
   const latestRunIds = new Map<string, number>();
 
   const nextRunId = (conversationKey: string): number => {
@@ -254,6 +257,7 @@ export async function startDiscordPortBot({
   onInfo,
   onWarning,
   onError,
+  multiAuthAccountManager,
 }: {
   token: string;
   adapter: DiscordPortRuntimeAdapter;
@@ -263,6 +267,7 @@ export async function startDiscordPortBot({
   onInfo?: (message: string) => void;
   onWarning?: (message: string) => void;
   onError?: (message: string) => void;
+  multiAuthAccountManager?: AccountManager;
 }) {
   const resolvedClient = client ?? createDiscordPortClient(enableMessageContent);
   const runtime = new DiscordPortRuntime(resolvedClient, adapter);
@@ -274,6 +279,7 @@ export async function startDiscordPortBot({
     onInfo,
     onWarning,
     onError,
+    multiAuthAccountManager,
   });
   await resolvedClient.login(token);
   return { client: resolvedClient, runtime };

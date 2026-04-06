@@ -597,7 +597,7 @@ export class PiSessionPool {
         await handle.session.abort().catch(() => undefined);
         handle.session.dispose();
         this.sessions.delete(conversationKey);
-        this.registry.deleteSessionFile(conversationKey);
+        // Keep session file so history is preserved on resume.
       }
 
       this.workspaces.delete(workspaceKey);
