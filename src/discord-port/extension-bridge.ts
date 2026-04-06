@@ -237,7 +237,6 @@ export async function startDiscordPortExtensionRuntime({
         if (config.multiAuth?.enabled !== false) {
           const maConfig = buildMultiAuthExtensionConfig(config.multiAuth ?? {});
           multiAuthAccountManager = new AccountManager(undefined, undefined, undefined, undefined, undefined, maConfig);
-          const keyDistributor = multiAuthAccountManager.getKeyDistributor();
           try {
             await registerMultiAuthProviders(pi, multiAuthAccountManager, {
               excludeProviders: config.multiAuth?.excludeProviders,

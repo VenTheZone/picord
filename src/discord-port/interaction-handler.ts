@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
 
-import { LiveDiscordRunRenderer, chunkDiscordMarkdown, createInteractionLiveMessageTarget, normalizeDiscordText } from "../live-discord-renderer.js";
+import { LiveDiscordRunRenderer, createInteractionLiveMessageTarget } from "../live-discord-renderer.js";
 import {
   buildEffectiveAccessConfig,
   extractMemberRoleIds,
@@ -36,9 +36,10 @@ const SCOPE_MODELS_APPLY_PREFIX = "scope-models:apply:";
 const SCOPE_MODELS_CLEAR = "scope-models:clear";
 const ADD_PROJECT_SELECT = "add-project:select";
 const LOGIN_PROVIDER_SELECT = "login:provider";
-const LOGIN_OPENAI_COMPLETE = "login:openai:complete";
+const LOGIN_OAUTH_COMPLETE_PREFIX = "login:oauth:complete:";
+const LOGIN_OAUTH_PROMPT_PREFIX = "login:oauth:prompt:";
 const LOGIN_API_KEY_MODAL_PREFIX = "login:api-key:";
-const LOGIN_OPENAI_MODAL = "login:openai:modal";
+const LOGIN_OAUTH_MODAL_PREFIX = "login:oauth:modal:";
 const SESSION_SELECT = "session:select";
 const ACCESS_BUTTON_PREFIX = "access:";
 const OUTSIDE_WORKSPACE_PROJECT_SELECT = "outside-workspace:project-select";
@@ -52,10 +53,10 @@ export function extractDeviceCodeFromInstructions(instructions?: string): string
   if (!instructions) return undefined;
 
   const patterns = [
-    /enter\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
-    /one-time\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
-    /device\s+code\s*[:\-]?\s*([A-Z0-9-]{4,})/i,
-    /code\s*[:\-]\s*([A-Z0-9-]{4,})/i,
+    /enter\s+code\s*[:-]?\s*([A-Z0-9-]{4,})/i,
+    /one-time\s+code\s*[:-]?\s*([A-Z0-9-]{4,})/i,
+    /device\s+code\s*[:-]?\s*([A-Z0-9-]{4,})/i,
+    /code\s*[:-]\s*([A-Z0-9-]{4,})/i,
   ];
 
   for (const pattern of patterns) {
@@ -67,7 +68,7 @@ export function extractDeviceCodeFromInstructions(instructions?: string): string
   return undefined;
 }
 
-export function buildOpenAICodexLoginEmbed({
+export function buildOAuthLoginEmbed({
   providerName,
   verificationUrl,
   instructions,
@@ -78,7 +79,7 @@ export function buildOpenAICodexLoginEmbed({
 }): EmbedBuilder {
   const deviceCode = extractDeviceCodeFromInstructions(instructions);
   const embed = new EmbedBuilder()
-    .setTitle("OpenAI Codex Login")
+    .setTitle(`${providerName} Login`)
     .setColor(deviceCode ? 0x5865f2 : 0xf59e0b)
     .setDescription(deviceCode
       ? `Provider: **${providerName}**\nA visible device code was detected, so Discord can show it without acting like a confused toaster.`
@@ -295,10 +296,18 @@ export function buildLoginProviderLines(providers: Array<{
   name: string;
   method: "api-key" | "oauth";
   hasStoredAuth: boolean;
+  supportsDiscordFlow?: boolean;
+  discordFlowReason?: string;
 }>): string[] {
   return [
     "Choose a provider to log in or update.",
-    ...providers.slice(0, 25).map((provider) => `- ${provider.name} (${provider.method}${provider.hasStoredAuth ? ", configured" : ", not configured"})`),
+    ...providers.slice(0, 25).map((provider) => {
+      const status = `${provider.method}${provider.hasStoredAuth ? ", configured" : ", not configured"}`;
+      const suffix = provider.supportsDiscordFlow === false
+        ? `, local-only: ${provider.discordFlowReason ?? "not available in Discord yet"}`
+        : "";
+      return `- ${provider.name} (${status}${suffix})`;
+    }),
   ];
 }
 
@@ -379,12 +388,12 @@ async function checkInteractionAccess(
 export function registerDiscordPortInteractionHandler({
   client,
   runtime,
-  onReload,
+  _onReload,
   multiAuthAccountManager,
 }: {
   client: Client;
   runtime: DiscordPortRuntime;
-  onReload?: () => void;
+  _onReload?: () => void;
   multiAuthAccountManager?: AccountManager;
 }) {
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {
@@ -483,28 +492,51 @@ export function registerDiscordPortInteractionHandler({
           throw new Error(`Unknown provider: ${providerId}`);
         }
 
-        if (provider.id === "openai-codex") {
-          const started = await runtime.adapter.startOpenAICodexLogin(interaction.user.id);
+        if (provider.method === "oauth") {
+          if (provider.supportsDiscordFlow === false) {
+            await interaction.update({
+              content: [
+                `**${provider.name}** cannot finish OAuth inside Discord yet.`,
+                provider.discordFlowReason ?? "Use pi locally for this provider's login flow.",
+              ].join("\n"),
+              embeds: [],
+              components: [],
+            });
+            return;
+          }
 
-          const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          const started = await runtime.adapter.startProviderOAuthLogin(provider.id, interaction.user.id);
+
+          const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
               .setStyle(ButtonStyle.Link)
               .setLabel("Open verification page")
               .setURL(started.url),
             new ButtonBuilder()
-              .setCustomId(LOGIN_OPENAI_COMPLETE)
+              .setCustomId(`${LOGIN_OAUTH_COMPLETE_PREFIX}${provider.id}`)
               .setLabel("Complete login")
               .setStyle(ButtonStyle.Primary),
           );
+          const components: Array<ActionRowBuilder<ButtonBuilder>> = [buttonRow];
+          if (started.pendingPrompt) {
+            components.push(
+              new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`${LOGIN_OAUTH_PROMPT_PREFIX}${provider.id}`)
+                  .setLabel("Answer provider prompt")
+                  .setStyle(ButtonStyle.Secondary),
+              ),
+            );
+          }
 
           await interaction.update({
-            content: "OpenAI Codex login ready. Use the buttons below.",
-            embeds: [buildOpenAICodexLoginEmbed({
+            content: `${provider.name} login ready. Use the buttons below.${started.pendingPrompt ? "\nThis provider needs one extra answer before login can finish." : ""}${provider.discordFlowReason ? `\n${provider.discordFlowReason}` : ""}`,
+            embeds: [buildOAuthLoginEmbed({
               providerName: provider.name,
               verificationUrl: started.url,
               instructions: started.instructions,
             })],
-            components: [buttons],
+            components,
           });
           return;
         }
@@ -704,13 +736,50 @@ export function registerDiscordPortInteractionHandler({
       return;
     }
 
-    if (interaction.isButton() && interaction.customId === LOGIN_OPENAI_COMPLETE) {
+    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_PROMPT_PREFIX)) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
+        const providerId = interaction.customId.slice(LOGIN_OAUTH_PROMPT_PREFIX.length);
+        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        const prompt = runtime.adapter.getPendingOAuthPrompt(providerId, interaction.user.id);
+        if (!prompt) {
+          throw new Error("This login is not currently waiting for a provider prompt.");
+        }
         const modal = new ModalBuilder()
-          .setCustomId(LOGIN_OPENAI_MODAL)
-          .setTitle("Complete OpenAI Codex login")
+          .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}:prompt`)
+          .setTitle(`Answer ${(provider?.name ?? providerId)} prompt`)
+          .addComponents(
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder()
+                .setCustomId("prompt")
+                .setLabel(prompt.message.slice(0, 45) || "Prompt")
+                .setPlaceholder(prompt.placeholder?.slice(0, 100) ?? "")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(!prompt.allowEmpty),
+            ),
+          );
+        await interaction.showModal(modal);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        } else {
+          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        }
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_COMPLETE_PREFIX)) {
+      try {
+        requireOwner(interaction as never, runtime);
+        requireHostChannel(interaction as never, runtime);
+        const providerId = interaction.customId.slice(LOGIN_OAUTH_COMPLETE_PREFIX.length);
+        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        const modal = new ModalBuilder()
+          .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}`)
+          .setTitle(`Complete ${(provider?.name ?? providerId)} login`)
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
@@ -773,10 +842,18 @@ export function registerDiscordPortInteractionHandler({
           return;
         }
 
-        if (interaction.customId === LOGIN_OPENAI_MODAL) {
+        if (interaction.customId.startsWith(LOGIN_OAUTH_MODAL_PREFIX)) {
+          const rawProviderId = interaction.customId.slice(LOGIN_OAUTH_MODAL_PREFIX.length);
+          const [providerId, mode] = rawProviderId.split(":", 2);
+          const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
           await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-          await runtime.adapter.completeOpenAICodexLogin(interaction.user.id, interaction.fields.getTextInputValue("code"));
-          await interaction.editReply({ content: "OpenAI Codex login completed successfully." });
+          if (mode === "prompt") {
+            runtime.adapter.submitProviderOAuthPrompt(providerId, interaction.user.id, interaction.fields.getTextInputValue("prompt"));
+            await interaction.editReply({ content: `${provider?.name ?? providerId} prompt answer submitted. Finish the browser/device step, then use Complete login.` });
+            return;
+          }
+          await runtime.adapter.completeProviderOAuthLogin(providerId, interaction.user.id, interaction.fields.getTextInputValue("code"));
+          await interaction.editReply({ content: `${provider?.name ?? providerId} login completed successfully.` });
           return;
         }
       } catch (error) {
@@ -899,7 +976,7 @@ export function registerDiscordPortInteractionHandler({
           .addOptions(...providers.slice(0, 25).map((provider) => ({
             label: provider.name.slice(0, 100),
             value: provider.id,
-            description: `${provider.method === "oauth" ? "OAuth / subscription login" : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100),
+            description: `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100),
           })));
 
         await interaction.reply({

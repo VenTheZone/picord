@@ -313,6 +313,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAskCommand(),
     buildScopeModelsCommand(),
     buildUseModelCommand(),
+    buildUseModelCommand("model"),
     buildThinkCommand(),
     buildLoginCommand(),
     buildReloadCommand(),

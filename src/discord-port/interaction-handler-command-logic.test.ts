@@ -33,15 +33,12 @@ function resolveSessionSelectionOutcome({
 }
 
 function resolveLoginSelectionBehavior({
-  providerId,
+  providerId: _providerId,
   method,
 }: {
   providerId: string;
   method: "api-key" | "oauth";
 }) {
-  if (providerId === "openai-codex") {
-    return { action: "start-openai-codex-login", nextStep: "openai-code-buttons" } as const;
-  }
   return {
     action: method === "api-key" ? "show-api-key-modal" : "start-oauth-login",
     nextStep: method === "api-key" ? "api-key-modal" : "oauth-follow-up",
@@ -87,8 +84,8 @@ describe("interaction command logic", () => {
 
   it("routes /login provider choices to the correct next step", () => {
     expect(resolveLoginSelectionBehavior({ providerId: "openai-codex", method: "oauth" })).toEqual({
-      action: "start-openai-codex-login",
-      nextStep: "openai-code-buttons",
+      action: "start-oauth-login",
+      nextStep: "oauth-follow-up",
     });
 
     expect(resolveLoginSelectionBehavior({ providerId: "openrouter", method: "api-key" })).toEqual({

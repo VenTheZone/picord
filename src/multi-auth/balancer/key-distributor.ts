@@ -1036,8 +1036,4 @@ function assertNotAborted(signal: AbortSignal | undefined, providerId: Supported
 	}
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export { DEFAULT_CONFIG };

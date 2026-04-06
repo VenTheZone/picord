@@ -27,7 +27,6 @@ import {
   registerMultiAuthProviders,
   initMultiAuthConfig,
   multiAuthDebugLogger,
-  RESOLVE_EXT_DEBUG_DIR,
 } from "./discord-port/multi-auth-integration.js";
 import { LiveDiscordRunRenderer, createChannelLiveMessageTarget, createInteractionLiveMessageTarget, type PiLiveUpdate } from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
@@ -607,7 +606,6 @@ export default function picordExtension(pi: ExtensionAPI) {
   let runtimeLock: RuntimeLock | undefined;
   let slashOnlyMode = false;
   let multiAuthAccountManager: AccountManager | undefined;
-  let multiAuthWarmupCompleted = false;
   const liveRenderers = new Map<string, { renderer: LiveDiscordRunRenderer; runId?: number }>();
   const conversationNoticeTargets = new Map<string, (content: string) => Promise<void>>();
   const hostControlChannels = new Map<string, string>();
@@ -1279,8 +1277,6 @@ export default function picordExtension(pi: ExtensionAPI) {
         await multiAuthAccountManager.autoActivatePreferredCredentials({ avoidUsageApi: true }).catch((err) => {
           ctx.ui.notify(`multi-auth warmup warning: ${err.message}`, "warning");
         });
-        multiAuthWarmupCompleted = true;
-
         if (maConfig.debug) {
           multiAuthDebugLogger.initialize(true);
         }

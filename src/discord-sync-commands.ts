@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { loadRuntimeConfig } from "./config.js";
 import { buildDiscordPortCommands } from "./discord-port/command-registration.js";
+import { buildAllMultiAuthCommands } from "./discord-port/multi-auth-commands.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 
@@ -29,7 +30,10 @@ async function main(): Promise<void> {
       throw new Error("Discord application metadata is unavailable after login.");
     }
 
-    const commands = buildDiscordPortCommands(sessionPool.getSkillSummaries());
+    const commands = [
+      ...buildDiscordPortCommands(sessionPool.getSkillSummaries()),
+      ...buildAllMultiAuthCommands(),
+    ];
 
     console.log("PICORD COMMAND SYNC");
     console.log("===================");

@@ -123,12 +123,20 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     this.sessionPool.setProviderApiKey(providerId, apiKey);
   }
 
-  startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
-    return this.sessionPool.startOpenAICodexLogin(userId);
+  startProviderOAuthLogin(providerId: string, userId: string): Promise<{ url: string; instructions?: string; pendingPrompt?: { message: string; placeholder?: string; allowEmpty?: boolean } }> {
+    return this.sessionPool.startProviderOAuthLogin(providerId, userId);
   }
 
-  completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void> {
-    return this.sessionPool.completeOpenAICodexLogin(userId, codeOrUrl);
+  getPendingOAuthPrompt(providerId: string, userId: string) {
+    return this.sessionPool.getPendingOAuthPrompt(providerId, userId);
+  }
+
+  submitProviderOAuthPrompt(providerId: string, userId: string, input: string): void {
+    this.sessionPool.submitProviderOAuthPrompt(providerId, userId, input);
+  }
+
+  completeProviderOAuthLogin(providerId: string, userId: string, codeOrUrl: string): Promise<void> {
+    return this.sessionPool.completeProviderOAuthLogin(providerId, userId, codeOrUrl);
   }
 
   registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void {

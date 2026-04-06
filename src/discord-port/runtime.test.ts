@@ -64,8 +64,10 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
     getEffectiveThinkingLevel: () => thinkingLevel,
     listLoginProviders: () => [],
     setProviderApiKey: () => undefined,
-    startOpenAICodexLogin: async () => ({ url: "https://example.com" }),
-    completeOpenAICodexLogin: async () => undefined,
+    startProviderOAuthLogin: async () => ({ url: "https://example.com" }),
+    getPendingOAuthPrompt: () => undefined,
+    submitProviderOAuthPrompt: () => undefined,
+    completeProviderOAuthLogin: async () => undefined,
     registerLiveRenderer: () => undefined,
     clearLiveRenderer: () => undefined,
     restartRuntime: async () => undefined,
@@ -95,6 +97,49 @@ afterEach(() => {
 });
 
 describe("DiscordPortRuntime", () => {
+  it("surfaces Discord login capability metadata from the adapter", () => {
+    const runtime = new DiscordPortRuntime(
+      {} as never,
+      createAdapter({
+        listLoginProviders: () => [
+          {
+            id: "openai-codex",
+            name: "ChatGPT Plus/Pro (Codex Subscription)",
+            method: "oauth",
+            hasStoredAuth: true,
+            supportsDiscordFlow: true,
+          },
+          {
+            id: "github-copilot",
+            name: "GitHub Copilot",
+            method: "oauth",
+            hasStoredAuth: false,
+            supportsDiscordFlow: false,
+            discordFlowReason: "OAuth login for this provider is not wired into Discord yet. Use pi locally for now.",
+          },
+        ],
+      }),
+    );
+
+    expect(runtime.adapter.listLoginProviders()).toEqual([
+      {
+        id: "openai-codex",
+        name: "ChatGPT Plus/Pro (Codex Subscription)",
+        method: "oauth",
+        hasStoredAuth: true,
+        supportsDiscordFlow: true,
+      },
+      {
+        id: "github-copilot",
+        name: "GitHub Copilot",
+        method: "oauth",
+        hasStoredAuth: false,
+        supportsDiscordFlow: false,
+        discordFlowReason: "OAuth login for this provider is not wired into Discord yet. Use pi locally for now.",
+      },
+    ]);
+  });
+
   it("lists available projects and marks managed directories", () => {
     const baseDir = createTempDir();
     mkdirSync(path.join(baseDir, "alpha"));

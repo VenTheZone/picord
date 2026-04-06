@@ -51,7 +51,7 @@ export function parseStructuredDiscordChoice(text: string): DiscordChoicePrompt 
 export function parseHeuristicDiscordChoice(text: string): DiscordChoicePrompt | undefined {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const numbered = lines
-    .map((line) => line.match(/^(?:option\s+)?([1-5A-E])[\).:\-]\s+(.+)$/i))
+    .map((line) => line.match(/^(?:option\s+)?([1-5A-E])[).:-]\s+(.+)$/i))
     .filter((match): match is RegExpMatchArray => Boolean(match));
 
   if (numbered.length < 2 || numbered.length > 5) return undefined;

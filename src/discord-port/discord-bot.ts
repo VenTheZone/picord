@@ -82,7 +82,7 @@ export function registerDiscordPortBot({
   onError?: (message: string) => void;
   multiAuthAccountManager?: AccountManager;
 }) {
-  registerDiscordPortInteractionHandler({ client, runtime, onReload, multiAuthAccountManager });
+  registerDiscordPortInteractionHandler({ client, runtime, _onReload: onReload, multiAuthAccountManager });
   const latestRunIds = new Map<string, number>();
 
   const nextRunId = (conversationKey: string): number => {

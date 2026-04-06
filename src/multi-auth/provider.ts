@@ -172,11 +172,11 @@ function isSubstantiveEvent(event: AssistantMessageEvent): boolean {
 	}
 }
 
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+const ANSI_PATTERN = new RegExp(String.raw`\u001B\[[0-9;]*m`, "g");
 const LETTER_OR_NUMBER_PATTERN = /[\p{L}\p{N}]/u;
 const WHITESPACE_PATTERN = /\s/u;
-const STRUCTURAL_SYMBOL_PATTERN = /[\[\]{}<>|^_=+*\\/~】》■•]/u;
-const LONG_STRUCTURAL_RUN_PATTERN = /(?:[\[\]{}<>|^_=+*\\/~-]{12,}|[】》■•]{4,})/u;
+const STRUCTURAL_SYMBOL_PATTERN = /[[\]{}<>|^_=+*\\/~】》■•]/u;
+const LONG_STRUCTURAL_RUN_PATTERN = /(?:[[\]{}<>|^_=+*\\/~-]{12,}|[】》■•]{4,})/u;
 const MALFORMED_THINKING_DECISION_MIN_CHARS = 96;
 const MALFORMED_THINKING_MIN_CHARS = 128;
 const MALFORMED_THINKING_MAX_LETTER_RATIO = 0.25;
@@ -523,7 +523,6 @@ export function createRotatingStreamWrapper(
 				};
 				activeBaseProvider = failoverBaseProvider;
 				excludedCredentialIds = new Set<string>();
-				const failTriggerStr = lastFailoverTrigger ? ` (${lastFailoverTrigger})` : "";
 				options?.onRotate?.(oldProviderId, target.providerId, "provider", lastFailoverTrigger);
 
 				lastRetryableMessage = null;

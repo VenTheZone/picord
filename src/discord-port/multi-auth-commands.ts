@@ -7,12 +7,9 @@ import {
 import type {
 	AccountManager,
 	ProviderStatus,
-	CredentialStatus,
 	SupportedProviderId,
-	RotationMode,
 } from "../multi-auth/index-export.js";
 
-const MAX_EMBED_FIELDS = 25;
 const MAX_FIELD_VALUE_LENGTH = 1024;
 
 // ---------------------------------------------------------------------------
@@ -29,8 +26,8 @@ export function buildMultiAuthStatusCommand(): RESTPostAPIChatInputApplicationCo
     .addSubcommand((sub) =>
       sub.setName("usage").setDescription("Show usage/quota for all or a specific provider credential"),
     )
-    .addSubcommand((sub) => sub.setName("health").setDescription("Show credential health scores")),
-    "multi-auth" as never;
+    .addSubcommand((sub) => sub.setName("health").setDescription("Show credential health scores"))
+    .toJSON();
 }
 
 export function buildMultiAuthAddApikeyCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {

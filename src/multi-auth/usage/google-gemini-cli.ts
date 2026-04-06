@@ -10,11 +10,6 @@ const GEMINI_HEADERS: Record<string, string> = {
 	"Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 };
 
-interface GeminiQuotaBucket {
-	remainingFraction?: number;
-	resetTime?: string;
-}
-
 interface ParsedQuotaWindow {
 	usedPercent: number;
 	resetsAt: number | null;

@@ -78,7 +78,7 @@ import {
 	OAuthRefreshFailureError,
 	UNSUPPORTED_OAUTH_REFRESH_PROVIDER_ERROR_CODE,
 } from "./types-oauth.js";
-import { DEFAULT_PROVIDER_POOL_CONFIG, type CredentialPool, type ProviderPoolConfig, type ProviderPoolState } from "./types-pool.js";
+import { DEFAULT_PROVIDER_POOL_CONFIG, type ProviderPoolConfig, type ProviderPoolState } from "./types-pool.js";
 import type { QuotaClassification, QuotaClassificationResult, QuotaStateForCredential } from "./types-quota.js";
 
 const QUOTA_COOLDOWN_MS = 60 * 60 * 1000;

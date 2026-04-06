@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="picord"
 SERVICE_NAME="picord"
-PI_BIN="/home/kytusdevenn/.npm-global/bin/pi"
+NODE_BIN="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin/node"
+PI_BIN="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin/pi"
+export PATH="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin:$PATH"
+export SHELL="/bin/bash"
 
 cd "$ROOT_DIR"
 
@@ -28,7 +31,7 @@ stop_systemd_if_running() {
 }
 
 start_tmux() {
-  tmux new-session -d -s "$SESSION_NAME" "cd '$ROOT_DIR' && set -a && source .env && set +a && exec '$PI_BIN' -e ./src/index.ts --no-session"
+  tmux new-session -d -s "$SESSION_NAME" "exec /bin/bash -c 'export PATH=/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin:\$PATH && export SHELL=/bin/bash && cd \"$ROOT_DIR\" && set -a && source .env && set +a && exec \"$NODE_BIN\" \"$PI_BIN\" -e ./src/index.ts --no-session'"
 }
 
 cmd_start() {
@@ -86,14 +89,29 @@ cmd_logs() {
   tmux capture-pane -pt "$SESSION_NAME" | tail -n 200
 }
 
+cmd_help() {
+  echo "picord - Discord integration for pi"
+  echo ""
+  echo "Usage: picord <command>"
+  echo ""
+  echo "Commands:"
+  echo "  start     Start picord (syncs Discord commands, launches in tmux)"
+  echo "  stop      Stop picord tmux session"
+  echo "  restart   Restart picord"
+  echo "  status    Show tmux and systemd status"
+  echo "  logs      Show recent logs (last 200 lines)"
+  echo "  help      Show this help message"
+}
+
 case "${1:-}" in
   start) cmd_start ;;
   stop) cmd_stop ;;
   restart) cmd_restart ;;
   status) cmd_status ;;
   logs) cmd_logs ;;
+  help|--help|-h) cmd_help ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|logs}" >&2
+    cmd_help
     exit 1
     ;;
 esac

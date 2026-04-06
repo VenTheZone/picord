@@ -127,7 +127,15 @@ function persistOpenAICodexLoginPreference(method: "headless" | "browser"): void
 }
 
 interface PendingOAuthLogin {
+  providerId: string;
   complete: (input: string) => void;
+  submitPromptResponse: (input: string) => void;
+  promptRequested: boolean;
+  currentPrompt?: {
+    message: string;
+    placeholder?: string;
+    allowEmpty?: boolean;
+  };
   promise: Promise<void>;
 }
 
@@ -175,11 +183,25 @@ export class PiSessionPool {
     return this.sessions.size;
   }
 
-  listLoginProviders(): Array<{ id: string; name: string; method: "api-key" | "oauth"; hasStoredAuth: boolean }> {
+  listLoginProviders(): Array<{
+    id: string;
+    name: string;
+    method: "api-key" | "oauth";
+    hasStoredAuth: boolean;
+    supportsDiscordFlow?: boolean;
+    discordFlowReason?: string;
+  }> {
     const oauthProviders = this.authStorage.getOAuthProviders();
     const oauthIds = new Set(oauthProviders.map((provider) => provider.id));
     const configuredProviders = new Set(this.authStorage.list());
-    const providerOptions = new Map<string, { id: string; name: string; method: "api-key" | "oauth"; hasStoredAuth: boolean }>();
+    const providerOptions = new Map<string, {
+      id: string;
+      name: string;
+      method: "api-key" | "oauth";
+      hasStoredAuth: boolean;
+      supportsDiscordFlow?: boolean;
+      discordFlowReason?: string;
+    }>();
 
     for (const provider of oauthProviders) {
       providerOptions.set(provider.id, {
@@ -187,6 +209,10 @@ export class PiSessionPool {
         name: provider.name,
         method: "oauth",
         hasStoredAuth: configuredProviders.has(provider.id),
+        supportsDiscordFlow: true,
+        discordFlowReason: provider.usesCallbackServer === false
+          ? "This provider may ask follow-up questions during login instead of a browser callback, so Discord support is best-effort."
+          : undefined,
       });
     }
 
@@ -197,6 +223,7 @@ export class PiSessionPool {
         name: formatProviderName(model.provider),
         method: "api-key",
         hasStoredAuth: configuredProviders.has(model.provider),
+        supportsDiscordFlow: true,
       });
     }
 
@@ -211,28 +238,44 @@ export class PiSessionPool {
     this.authStorage.set(providerId, { type: "api_key", key: trimmed });
   }
 
-  async startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }> {
-    persistOpenAICodexLoginPreference("headless");
+  async startProviderOAuthLogin(providerId: string, userId: string): Promise<{ url: string; instructions?: string; pendingPrompt?: { message: string; placeholder?: string; allowEmpty?: boolean } }> {
+    const provider = this.authStorage.getOAuthProviders().find((entry) => entry.id === providerId);
+    if (!provider) {
+      throw new Error(`OAuth provider is not registered: ${providerId}`);
+    }
 
-    if (this.pendingOAuthLogins.has(userId)) {
-      throw new Error("An OpenAI Codex login is already in progress.");
+    if (providerId === "openai-codex") {
+      persistOpenAICodexLoginPreference("headless");
+    }
+
+    const existing = this.pendingOAuthLogins.get(userId);
+    if (existing) {
+      throw new Error(`A ${existing.providerId} login is already in progress.`);
     }
 
     let authUrl: string | undefined;
     let authInstructions: string | undefined;
     let resolveCodeInput: ((input: string) => void) | undefined;
+    let resolvePromptInput: ((input: string) => void) | undefined;
+    let currentPrompt: { message: string; placeholder?: string; allowEmpty?: boolean } | undefined;
 
-    const loginPromise = this.authStorage.login("openai-codex", {
+    const loginPromise = this.authStorage.login(providerId, {
       onAuth: ({ url, instructions }) => {
         authUrl = url;
         authInstructions = instructions;
       },
-      onPrompt: async ({ message }) => {
-        if (message.toLowerCase().includes("login method")) {
+      onPrompt: async ({ message, placeholder, allowEmpty }) => {
+        if (providerId === "openai-codex" && message.toLowerCase().includes("login method")) {
           return "headless";
         }
+        currentPrompt = { message, placeholder, allowEmpty };
+        const pending = this.pendingOAuthLogins.get(userId);
+        if (pending) {
+          pending.promptRequested = true;
+          pending.currentPrompt = currentPrompt;
+        }
         return await new Promise<string>((resolve) => {
-          resolveCodeInput = resolve;
+          resolvePromptInput = resolve;
         });
       },
       onManualCodeInput: async () => {
@@ -246,30 +289,61 @@ export class PiSessionPool {
     });
 
     this.pendingOAuthLogins.set(userId, {
+      providerId,
+      promptRequested: false,
+      currentPrompt,
       complete: (input: string) => {
         if (!resolveCodeInput) {
           throw new Error("Manual code input is not currently needed for this login.");
         }
         resolveCodeInput(input);
       },
+      submitPromptResponse: (input: string) => {
+        if (!resolvePromptInput) {
+          throw new Error("OAuth login is not currently waiting for a prompt response.");
+        }
+        currentPrompt = undefined;
+        const pending = this.pendingOAuthLogins.get(userId);
+        if (pending) {
+          pending.promptRequested = false;
+          pending.currentPrompt = undefined;
+        }
+        resolvePromptInput(input);
+      },
       promise: loginPromise,
     });
 
     for (let i = 0; i < 50; i += 1) {
       if (authUrl) {
-        return { url: authUrl, instructions: authInstructions };
+        return { url: authUrl, instructions: authInstructions, pendingPrompt: currentPrompt };
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     this.pendingOAuthLogins.delete(userId);
-    throw new Error("OpenAI Codex login could not be started.");
+    throw new Error(`${provider.name} login could not be started.`);
   }
 
-  async completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void> {
+  getPendingOAuthPrompt(providerId: string, userId: string): { message: string; placeholder?: string; allowEmpty?: boolean } | undefined {
     const pending = this.pendingOAuthLogins.get(userId);
-    if (!pending) {
-      throw new Error("No OpenAI Codex login is in progress. Run /login first.");
+    if (!pending || pending.providerId !== providerId || !pending.promptRequested) {
+      return undefined;
+    }
+    return pending.currentPrompt;
+  }
+
+  submitProviderOAuthPrompt(providerId: string, userId: string, input: string): void {
+    const pending = this.pendingOAuthLogins.get(userId);
+    if (!pending || pending.providerId !== providerId) {
+      throw new Error(`No ${providerId} login is in progress. Run /login first.`);
+    }
+    pending.submitPromptResponse(input);
+  }
+
+  async completeProviderOAuthLogin(providerId: string, userId: string, codeOrUrl: string): Promise<void> {
+    const pending = this.pendingOAuthLogins.get(userId);
+    if (!pending || pending.providerId !== providerId) {
+      throw new Error(`No ${providerId} login is in progress. Run /login first.`);
     }
     pending.complete(codeOrUrl);
     await pending.promise;

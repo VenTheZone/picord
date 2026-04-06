@@ -3,7 +3,7 @@ import {
   buildAccessRequestLines,
   buildGroupedSessionLines,
   buildLoginProviderLines,
-  buildOpenAICodexLoginEmbed,
+  buildOAuthLoginEmbed,
   extractDeviceCodeFromInstructions,
 } from "./interaction-handler.js";
 
@@ -49,13 +49,21 @@ describe("interaction-handler helpers", () => {
 
   it("builds readable /login provider summary lines", () => {
     const lines = buildLoginProviderLines([
-      { name: "ChatGPT Plus/Pro (Codex Subscription)", method: "oauth", hasStoredAuth: true },
-      { name: "OpenRouter", method: "api-key", hasStoredAuth: false },
+      { name: "ChatGPT Plus/Pro (Codex Subscription)", method: "oauth", hasStoredAuth: true, supportsDiscordFlow: true },
+      {
+        name: "GitHub Copilot",
+        method: "oauth",
+        hasStoredAuth: false,
+        supportsDiscordFlow: false,
+        discordFlowReason: "OAuth login for this provider is not wired into Discord yet. Use pi locally for now.",
+      },
+      { name: "OpenRouter", method: "api-key", hasStoredAuth: false, supportsDiscordFlow: true },
     ]);
 
     expect(lines).toEqual([
       "Choose a provider to log in or update.",
       "- ChatGPT Plus/Pro (Codex Subscription) (oauth, configured)",
+      "- GitHub Copilot (oauth, not configured, local-only: OAuth login for this provider is not wired into Discord yet. Use pi locally for now.)",
       "- OpenRouter (api-key, not configured)",
     ]);
   });
@@ -78,21 +86,21 @@ describe("interaction-handler helpers", () => {
     expect(extractDeviceCodeFromInstructions("Open the page and continue in browser.")).toBeUndefined();
   });
 
-  it("builds an OpenAI login embed with the detected device code when available", () => {
-    const embed = buildOpenAICodexLoginEmbed({
+  it("builds an OAuth login embed with the detected device code when available", () => {
+    const embed = buildOAuthLoginEmbed({
       providerName: "ChatGPT Plus/Pro (Codex Subscription)",
       verificationUrl: "https://example.com/verify",
       instructions: "Open the page, then enter code: ABCD-EFGH",
     }).toJSON();
 
-    expect(embed.title).toBe("OpenAI Codex Login");
+    expect(embed.title).toBe("ChatGPT Plus/Pro (Codex Subscription) Login");
     expect(embed.description).toContain("device code was detected");
     expect(embed.fields?.some((field) => field.name === "Device code" && field.value.includes("ABCD-EFGH"))).toBe(true);
     expect(embed.fields?.some((field) => field.name === "Provider instructions" && field.value.includes("enter code: ABCD-EFGH"))).toBe(true);
   });
 
-  it("builds an OpenAI login embed that explains the localhost callback fallback when no device code exists", () => {
-    const embed = buildOpenAICodexLoginEmbed({
+  it("builds an OAuth login embed that explains the localhost callback fallback when no device code exists", () => {
+    const embed = buildOAuthLoginEmbed({
       providerName: "ChatGPT Plus/Pro (Codex Subscription)",
       verificationUrl: "https://example.com/verify",
       instructions: "Open the page and continue in browser.",

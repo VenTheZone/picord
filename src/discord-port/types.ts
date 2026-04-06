@@ -14,6 +14,8 @@ export interface LoginProviderOption {
   name: string;
   method: "api-key" | "oauth";
   hasStoredAuth: boolean;
+  supportsDiscordFlow?: boolean;
+  discordFlowReason?: string;
 }
 
 export interface PiBoundSessionSummary {
@@ -70,8 +72,10 @@ export interface DiscordPortRuntimeAdapter {
   getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel;
   listLoginProviders(): LoginProviderOption[];
   setProviderApiKey(providerId: string, apiKey: string): void;
-  startOpenAICodexLogin(userId: string): Promise<{ url: string; instructions?: string }>;
-  completeOpenAICodexLogin(userId: string, codeOrUrl: string): Promise<void>;
+  startProviderOAuthLogin(providerId: string, userId: string): Promise<{ url: string; instructions?: string; pendingPrompt?: { message: string; placeholder?: string; allowEmpty?: boolean } }>;
+  getPendingOAuthPrompt(providerId: string, userId: string): { message: string; placeholder?: string; allowEmpty?: boolean } | undefined;
+  submitProviderOAuthPrompt(providerId: string, userId: string, input: string): void;
+  completeProviderOAuthLogin(providerId: string, userId: string, codeOrUrl: string): Promise<void>;
   registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void;
   clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void;
   restartRuntime(options?: { notifyChannelId?: string; requestedByUserId?: string; requestedByTag?: string }): Promise<void>;

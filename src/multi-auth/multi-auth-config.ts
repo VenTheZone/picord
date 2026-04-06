@@ -4,7 +4,6 @@ import {
 	DEFAULT_HEALTH_CONFIG,
 	DEFAULT_HEALTH_WEIGHTS,
 	type HealthMetricsConfig,
-	type HealthScoreWeights,
 } from "./types-health.js";
 import { DEFAULT_OAUTH_CONFIG, type OAuthRefreshConfig } from "./types-oauth.js";
 import {
@@ -123,7 +122,7 @@ export function resolveStateHistoryPersistencePaths(
 	};
 }
 
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 
 export function ensureMultiAuthDebugDirectory(debugDir = RESOLVE_EXT_DEBUG_DIR()): string | undefined {
 	try {
