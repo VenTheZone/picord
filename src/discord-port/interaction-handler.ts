@@ -1460,8 +1460,40 @@ export function registerDiscordPortInteractionHandler({
         }
         return;
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+
+      if (interaction.commandName === "compact" || interaction.commandName === "auto-compact") {
+        requireGuild(interaction);
+        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        if (!thread && !interaction.guildId) {
+          throw new Error("Context compaction is only available in session threads or project channels.");
+        }
+
+        const binding = runtime.bindThread(thread as never);
+        if (interaction.commandName === "compact") {
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+          try {
+            const success = await runtime.adapter.compactSession(binding.conversationKey);
+            await interaction.editReply({
+              content: success
+                ? "✅ Context compaction completed successfully."
+                : "⚠️ Context compaction was not performed (context likely too small).",
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await interaction.editReply({ content: `❌ Compaction failed: ${msg}` });
+          }
+          return;
+        }
+
+        const currentEnabled = runtime.adapter.getAutoCompactionEnabled(binding.conversationKey);
+        runtime.adapter.setAutoCompactionEnabled(binding.conversationKey, !currentEnabled);
+        await interaction.reply({
+          content: `♻️ Automatic compaction is now ${currentEnabled ? "disabled" : "enabled"}.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+    } catch (error) {      const message = error instanceof Error ? error.message : String(error);
       if (interaction.deferred || interaction.replied) {
         await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
       } else {

@@ -287,6 +287,20 @@ function buildOutsideWorkspaceAccessCommand(): RESTPostAPIChatInputApplicationCo
     .toJSON();
 }
 
+function buildCompactCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("compact")
+    .setDescription("Manually compact the current session context")
+    .toJSON();
+}
+
+function buildAutoCompactCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("auto-compact")
+    .setDescription("Toggle automatic context compaction")
+    .toJSON();
+}
+
 function buildStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("status")
@@ -299,7 +313,6 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAskCommand(),
     buildScopeModelsCommand(),
     buildUseModelCommand(),
-    buildUseModelCommand("model"),
     buildThinkCommand(),
     buildLoginCommand(),
     buildReloadCommand(),
@@ -320,6 +333,8 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAccessRequestsCommand(),
     buildOutsideWorkspaceAccessCommand(),
     buildStatusCommand(),
+    buildCompactCommand(),
+    buildAutoCompactCommand(),
     ...skills.map(buildSkillCommand).filter((command): command is RESTPostAPIChatInputApplicationCommandsJSONBody => Boolean(command)),
   ];
 }

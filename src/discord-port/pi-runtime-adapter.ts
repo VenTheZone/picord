@@ -197,6 +197,21 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.restartSession(conversationKey, workspaceKey);
   }
 
+  compactSession(conversationKey: string, _?: string): Promise<boolean> {
+    return this.sessionPool
+      .compact({ conversationKey })
+      .then((result) => result !== undefined)
+      .catch(() => false);
+  }
+
+  getAutoCompactionEnabled(conversationKey: string): boolean {
+    return this.sessionPool.getAutoCompactionEnabled(conversationKey);
+  }
+
+  setAutoCompactionEnabled(conversationKey: string, enabled: boolean): void {
+    return this.sessionPool.setAutoCompactionEnabled(conversationKey, enabled);
+  }
+
   async resumeSession(options: {
     conversationKey: string;
     workspaceKey: string;

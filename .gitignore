@@ -12,3 +12,5 @@ picord.confg.json
 .picord.pid
 docs/
 tests/
+home/
+tmux-*.log

@@ -9,6 +9,7 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
+  type CompactionResult,
   type AgentSession,
   type SessionInfo,
   type Skill,
@@ -603,6 +604,23 @@ export class PiSessionPool {
       this.workspaces.delete(workspaceKey);
       return Boolean(handle);
     });
+  }
+
+  async compact(context: { conversationKey: string; instructions?: string }): Promise<CompactionResult | undefined> {
+    const handle = this.sessions.get(context.conversationKey);
+    if (!handle) return undefined;
+    return handle.session.compact(context.instructions);
+  }
+
+  getAutoCompactionEnabled(conversationKey: string): boolean {
+    const handle = this.sessions.get(conversationKey);
+    return handle?.session.autoCompactionEnabled ?? false;
+  }
+
+  setAutoCompactionEnabled(conversationKey: string, enabled: boolean): void {
+    const handle = this.sessions.get(conversationKey);
+    if (!handle) return;
+    handle.session.setAutoCompactionEnabled(enabled);
   }
 
   async dispose(): Promise<void> {

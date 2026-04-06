@@ -98,6 +98,10 @@ export interface DiscordPortRuntimeAdapter {
   resolveAccessRequest(requestId: string, mode: ApprovalDecisionMode): AccessRequest | undefined;
   abort(conversationKey: string): Promise<boolean>;
   reset(conversationKey: string): Promise<boolean>;
+  restartSession(conversationKey: string, workspaceKey: string): Promise<boolean>;
+  compactSession(conversationKey: string, instructions?: string): Promise<boolean>;
+  getAutoCompactionEnabled(conversationKey: string): boolean;
+  setAutoCompactionEnabled(conversationKey: string, enabled: boolean): void;
   resumeSession(options: {
     conversationKey: string;
     workspaceKey: string;
