@@ -40,6 +40,7 @@ const LOGIN_OAUTH_COMPLETE_PREFIX = "login:oauth:complete:";
 const LOGIN_OAUTH_PROMPT_PREFIX = "login:oauth:prompt:";
 const LOGIN_API_KEY_MODAL_PREFIX = "login:api-key:";
 const LOGIN_OAUTH_MODAL_PREFIX = "login:oauth:modal:";
+const LOGIN_OAUTH_CANCEL_PREFIX = "login:oauth:cancel:";
 const SESSION_SELECT = "session:select";
 const ACCESS_BUTTON_PREFIX = "access:";
 const OUTSIDE_WORKSPACE_PROJECT_SELECT = "outside-workspace:project-select";
@@ -47,6 +48,10 @@ const OUTSIDE_WORKSPACE_BUTTON_PREFIX = "outside-workspace:toggle:";
 
 function truncateEmbedFieldValue(value: string, maxLength = 1024): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+}
+
+function truncateToLimit(str: string, limit: number): string {
+  return str.length <= limit ? str : `${str.slice(0, limit - 1)}…`;
 }
 
 export function extractDeviceCodeFromInstructions(instructions?: string): string | undefined {
@@ -516,6 +521,10 @@ export function registerDiscordPortInteractionHandler({
               .setCustomId(`${LOGIN_OAUTH_COMPLETE_PREFIX}${provider.id}`)
               .setLabel("Complete login")
               .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId(`${LOGIN_OAUTH_CANCEL_PREFIX}${provider.id}`)
+              .setLabel("Cancel login")
+              .setStyle(ButtonStyle.Danger),
           );
           const components: Array<ActionRowBuilder<ButtonBuilder>> = [buttonRow];
           if (started.pendingPrompt) {
@@ -543,13 +552,15 @@ export function registerDiscordPortInteractionHandler({
 
         const modal = new ModalBuilder()
           .setCustomId(`${LOGIN_API_KEY_MODAL_PREFIX}${provider.id}`)
-          .setTitle(`Set ${provider.name} API key`)
+          .setTitle(truncateToLimit(`Set ${provider.name} API key`, 45))
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId("apiKey")
                 .setLabel("API key")
                 .setStyle(TextInputStyle.Paragraph)
+                .setMinLength(1)
+                .setMaxLength(4000)
                 .setRequired(true),
             ),
           );
@@ -748,7 +759,7 @@ export function registerDiscordPortInteractionHandler({
         }
         const modal = new ModalBuilder()
           .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}:prompt`)
-          .setTitle(`Answer ${(provider?.name ?? providerId)} prompt`)
+          .setTitle(truncateToLimit(`Answer ${(provider?.name ?? providerId)} prompt`, 45))
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
@@ -756,6 +767,8 @@ export function registerDiscordPortInteractionHandler({
                 .setLabel(prompt.message.slice(0, 45) || "Prompt")
                 .setPlaceholder(prompt.placeholder?.slice(0, 100) ?? "")
                 .setStyle(TextInputStyle.Short)
+                .setMinLength(1)
+                .setMaxLength(1024)
                 .setRequired(!prompt.allowEmpty),
             ),
           );
@@ -779,7 +792,7 @@ export function registerDiscordPortInteractionHandler({
         const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
         const modal = new ModalBuilder()
           .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}`)
-          .setTitle(`Complete ${(provider?.name ?? providerId)} login`)
+          .setTitle(truncateToLimit(`Complete ${(provider?.name ?? providerId)} login`, 45))
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
@@ -787,10 +800,34 @@ export function registerDiscordPortInteractionHandler({
                 .setLabel("Paste the final local-browser redirect URL")
                 .setPlaceholder("http://localhost:1455/auth/callback?code=...&state=... or just the code")
                 .setStyle(TextInputStyle.Paragraph)
+                .setMinLength(1)
+                .setMaxLength(4000)
                 .setRequired(true),
             ),
           );
         await interaction.showModal(modal);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        } else {
+          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        }
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_CANCEL_PREFIX)) {
+      try {
+        requireOwner(interaction as never, runtime);
+        const providerId = interaction.customId.slice(LOGIN_OAUTH_CANCEL_PREFIX.length);
+        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        runtime.adapter.cancelProviderOAuthLogin(interaction.user.id);
+        await interaction.update({
+          content: `${provider?.name ?? providerId} login cancelled. Ready for a fresh attempt with /login.`,
+          embeds: [],
+          components: [],
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {

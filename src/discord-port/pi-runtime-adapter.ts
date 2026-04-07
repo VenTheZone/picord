@@ -139,6 +139,10 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.completeProviderOAuthLogin(providerId, userId, codeOrUrl);
   }
 
+  cancelProviderOAuthLogin(userId: string): boolean {
+    return this.sessionPool.cancelProviderOAuthLogin(userId);
+  }
+
   registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void {
     this.liveRenderers.set(conversationKey, { renderer, runId });
   }

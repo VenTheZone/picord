@@ -129,6 +129,7 @@ function persistOpenAICodexLoginPreference(method: "headless" | "browser"): void
 interface PendingOAuthLogin {
   providerId: string;
   complete: (input: string) => void;
+  cancel: () => void;
   submitPromptResponse: (input: string) => void;
   promptRequested: boolean;
   currentPrompt?: {
@@ -292,6 +293,15 @@ export class PiSessionPool {
       providerId,
       promptRequested: false,
       currentPrompt,
+      cancel: () => {
+        // Resolve pending promises with an error so the login flow aborts cleanly.
+        if (resolveCodeInput) {
+          resolveCodeInput("");
+        }
+        if (resolvePromptInput) {
+          resolvePromptInput("__cancelled__");
+        }
+      },
       complete: (input: string) => {
         if (!resolveCodeInput) {
           throw new Error("Manual code input is not currently needed for this login.");
@@ -347,6 +357,14 @@ export class PiSessionPool {
     }
     pending.complete(codeOrUrl);
     await pending.promise;
+  }
+
+  cancelProviderOAuthLogin(userId: string): boolean {
+    const pending = this.pendingOAuthLogins.get(userId);
+    if (!pending) return false;
+    pending.cancel();
+    this.pendingOAuthLogins.delete(userId);
+    return true;
   }
 
   getSkillSummaries(): SkillSummary[] {

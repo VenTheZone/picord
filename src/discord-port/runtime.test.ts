@@ -68,6 +68,7 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
     getPendingOAuthPrompt: () => undefined,
     submitProviderOAuthPrompt: () => undefined,
     completeProviderOAuthLogin: async () => undefined,
+    cancelProviderOAuthLogin: () => false,
     registerLiveRenderer: () => undefined,
     clearLiveRenderer: () => undefined,
     restartRuntime: async () => undefined,
