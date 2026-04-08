@@ -30,7 +30,10 @@ import { isGitWorkspace, reviewGitDiff, shareGitDiff } from "../critique.js";
 import { buildPromptFromInteraction, replyToInteraction } from "./message-helpers.js";
 import { handleMultiAuthCommand } from "./multi-auth-commands.js";
 import type { AccountManager } from "./multi-auth-integration.js";
+import { getOAuthProviders } from "../multi-auth/oauth-compat.js";
 import type { DiscordPortRuntime } from "./runtime.js";
+import type { LoginProviderOption } from "./types.js";
+import type { SupportedProviderId } from "../multi-auth/index-export.js";
 
 const SCOPE_MODELS_APPLY_PREFIX = "scope-models:apply:";
 const SCOPE_MODELS_CLEAR = "scope-models:clear";
@@ -129,6 +132,71 @@ export function buildOAuthLoginEmbed({
   return embed;
 }
 
+
+// --- Usage command helpers ---
+
+async function getUsageOverview(accountManager: AccountManager): Promise<Record<string, string>> {
+  const providers = await accountManager.getSupportedProviders();
+  const usageMap: Record<string, string> = {};
+
+  for (const provider of providers) {
+    try {
+      const status = await accountManager.getProviderStatus(provider);
+      for (const cred of status.credentials) {
+        const snapshot = cred.usageSnapshot;
+        if (!snapshot) continue;
+
+        const lines: string[] = [];
+
+        if (snapshot.primary) {
+          lines.push(`• Primary: ${snapshot.primary.usedPercent.toFixed(1)}% used`);
+          if (snapshot.primary.resetsAt) {
+            lines.push(`  Resets: ${new Date(snapshot.primary.resetsAt * 1000).toLocaleString()}`);
+          }
+        }
+        if (snapshot.secondary) {
+          lines.push(`• Secondary: ${snapshot.secondary.usedPercent.toFixed(1)}% used`);
+        }
+        if (snapshot.copilotQuota) {
+          if (snapshot.copilotQuota.chat) {
+            const chatRemain = snapshot.copilotQuota.chat.unlimited ? "∞" : (snapshot.copilotQuota.chat.remaining ?? "N/A");
+            lines.push(`• Copilot Chat: ${chatRemain} remaining${snapshot.copilotQuota.chat.unlimited ? " (unlimited)" : ""}`);
+          }
+          if (snapshot.copilotQuota.completions) {
+            const compRemain = snapshot.copilotQuota.completions.unlimited ? "∞" : (snapshot.copilotQuota.completions.remaining ?? "N/A");
+            lines.push(`• Copilot Completions: ${compRemain} remaining`);
+          }
+        }
+
+        lines.push(`• Requests: ${cred.usageCount}`);
+        if (cred.quotaErrorCount > 0) lines.push(`• Quota errors: ${cred.quotaErrorCount}`);
+        if (cred.transientErrorCount) lines.push(`• Transient errors: ${cred.transientErrorCount}`);
+        if (cred.expiresAt) lines.push(`• Expires: ${new Date(cred.expiresAt).toLocaleString()}`);
+
+        if (lines.length > 0) {
+          usageMap[`${provider} / ${cred.friendlyName ?? cred.credentialId}`] = lines.join("\n");
+        }
+      }
+    } catch {
+      usageMap[provider] = "Unable to fetch usage data.";
+    }
+  }
+
+  return usageMap;
+}
+
+function buildUsageEmbed(usageMap: Record<string, string>): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle("Credential Usage / Quota")
+    .setColor(0x5865f2)
+    .setTimestamp();
+
+  for (const [key, value] of Object.entries(usageMap)) {
+    embed.addFields({ name: key, value: truncateEmbedFieldValue(value), inline: false });
+  }
+
+  return embed;
+}
 
 function requireGuild(interaction: ChatInputCommandInteraction): asserts interaction is ChatInputCommandInteraction & { guildId: string } {
   if (!interaction.guildId) {
@@ -423,6 +491,20 @@ export function registerDiscordPortInteractionHandler({
             ? await runtime.findResumeChoices(workspaceKey, query)
             : runtime.findModelChoices(workspaceKey, query);
           await interaction.respond(choices);
+          return;
+        }
+
+        if (interaction.commandName === "usage" && focused.name === "provider") {
+          if (!multiAuthAccountManager) {
+            await interaction.respond([]);
+            return;
+          }
+          try {
+            const providers = await multiAuthAccountManager.getSupportedProviders();
+            await interaction.respond(providers.map((p: SupportedProviderId) => ({ name: p, value: p })));
+          } catch {
+            await interaction.respond([]);
+          }
           return;
         }
 
@@ -996,7 +1078,61 @@ export function registerDiscordPortInteractionHandler({
 
       if (interaction.commandName === "login") {
         requireGuild(interaction);
-        const providers = runtime.adapter.listLoginProviders();
+        const baseProviders = runtime.adapter.listLoginProviders();
+        const providerMap = new Map(baseProviders.map(p => [p.id, p]));
+
+        if (multiAuthAccountManager) {
+          try {
+            const maProviders = await multiAuthAccountManager.getSupportedProviders();
+            const registry = multiAuthAccountManager.getProviderRegistry();
+            const allOAuthProviders = getOAuthProviders();
+            const oauthById = new Map(allOAuthProviders.map(p => [p.id.trim(), p]));
+
+            for (const providerId of maProviders) {
+              if (providerMap.has(providerId)) continue;
+
+              const capabilities = registry.getProviderCapabilities(providerId);
+              let method: "api-key" | "oauth" = capabilities.supportsOAuth ? "oauth" : "api-key";
+              let name = providerId;
+              let supportsDiscordFlow: boolean | undefined;
+
+              if (method === "oauth") {
+                const oauthInfo = oauthById.get(providerId);
+                if (oauthInfo) {
+                  name = oauthInfo.name.trim() || providerId;
+                  // Assume multi-auth OAuth providers support Discord flow (device code)
+                  supportsDiscordFlow = true;
+                } else {
+                  // OAuth provider not in pi's OAuth registry; fallback to api-key
+                  method = "api-key";
+                }
+              }
+
+              let hasStoredAuth = false;
+              let credentialCount: number | undefined;
+              try {
+                const status = await multiAuthAccountManager.getProviderStatus(providerId);
+                hasStoredAuth = status.credentials.length > 0;
+                credentialCount = status.credentials.length;
+              } catch {
+                // ignore
+              }
+
+              providerMap.set(providerId, {
+                id: providerId,
+                name,
+                method,
+                hasStoredAuth,
+                credentialCount,
+                supportsDiscordFlow,
+              } as LoginProviderOption);
+            }
+          } catch {
+            // ignore errors, use baseProviders only
+          }
+        }
+
+        const providers = Array.from(providerMap.values());
         if (providers.length === 0) {
           await interaction.reply({
             content: "No login providers are available.",
@@ -1010,11 +1146,12 @@ export function registerDiscordPortInteractionHandler({
           .setPlaceholder("Choose a provider to log in or replace its API key")
           .setMinValues(1)
           .setMaxValues(1)
-          .addOptions(...providers.slice(0, 25).map((provider) => ({
-            label: provider.name.slice(0, 100),
-            value: provider.id,
-            description: `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100),
-          })));
+          .addOptions(...providers.slice(0, 25).map((provider) => {
+            const countLabel = provider.credentialCount ? ` (${provider.credentialCount})` : "";
+            const label = (provider.name + countLabel).slice(0, 100);
+            const description = `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100);
+            return { label, value: provider.id, description };
+          }));
 
         await interaction.reply({
           content: buildLoginProviderLines(providers).join("\n"),
@@ -1527,6 +1664,38 @@ export function registerDiscordPortInteractionHandler({
             : runtime.buildGuildStatus({ guildId: interaction.guildId, channelId: interaction.channelId });
 
         await replyToInteraction(interaction, content);
+        return;
+      }
+
+      // usage command
+      if (interaction.commandName === "usage") {
+        if (!multiAuthAccountManager) {
+          await replyToInteraction(interaction, "Multi-auth is not enabled.");
+          return;
+        }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const usageMap = await getUsageOverview(multiAuthAccountManager);
+          const providerFilter = interaction.options.getString("provider")?.trim();
+          let finalMap = usageMap;
+          if (providerFilter) {
+            const filtered: Record<string, string> = {};
+            for (const [key, value] of Object.entries(usageMap)) {
+              if (key.startsWith(providerFilter + "/") || key === providerFilter) {
+                filtered[key] = value;
+              }
+            }
+            if (Object.keys(filtered).length === 0) {
+              await interaction.editReply({ content: `No usage data found for provider \`${providerFilter}\`.` });
+              return;
+            }
+            finalMap = filtered;
+          }
+          await interaction.editReply({ embeds: [buildUsageEmbed(finalMap)] });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await interaction.editReply({ content: `Error: ${message}` });
+        }
         return;
       }
 

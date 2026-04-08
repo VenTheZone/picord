@@ -11,7 +11,6 @@ describe("discord command sync payload", () => {
 
     const names = commands.map((command) => command.name);
     expect(names).toContain("multi-auth");
-    expect(names).toContain("multi-auth-add-apikey");
     expect(names).toContain("multi-auth-delete");
     expect(names).toContain("multi-auth-switch");
     expect(names).toContain("multi-auth-auto");

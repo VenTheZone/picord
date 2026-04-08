@@ -308,6 +308,20 @@ function buildStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
     .toJSON();
 }
 
+function buildUsageCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("usage")
+    .setDescription("Show API usage and rate limits for multi-auth credentials")
+    .addStringOption((option) =>
+      option
+        .setName("provider")
+        .setDescription("Optional: filter by a specific provider")
+        .setRequired(false)
+        .setAutocomplete(true),
+    )
+    .toJSON();
+}
+
 export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
   return [
     buildAskCommand(),
@@ -334,6 +348,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAccessRequestsCommand(),
     buildOutsideWorkspaceAccessCommand(),
     buildStatusCommand(),
+    buildUsageCommand(),
     buildCompactCommand(),
     buildAutoCompactCommand(),
     ...skills.map(buildSkillCommand).filter((command): command is RESTPostAPIChatInputApplicationCommandsJSONBody => Boolean(command)),

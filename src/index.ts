@@ -33,6 +33,7 @@ import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 import { RuntimeLock } from "./runtime-lock.js";
 import type { PicordRuntimeConfig, SkillSummary } from "./types.js";
+import type { SupportedProviderId } from "./multi-auth/index-export.js";
 
 const RESERVED_COMMAND_NAMES = new Set([
   "ask",
@@ -48,7 +49,6 @@ const RESERVED_COMMAND_NAMES = new Set([
   "project-list",
   "access-requests",
   "multi-auth",
-  "multi-auth-add-apikey",
   "multi-auth-delete",
   "multi-auth-switch",
   "multi-auth-auto",
@@ -182,7 +182,10 @@ function buildSkillCommand(skill: SkillSummary): RESTPostAPIChatInputApplication
     .toJSON();
 }
 
-function buildSlashCommands(skills: SkillSummary[]): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
+async function buildSlashCommands(
+  skills: SkillSummary[],
+  providerList: SupportedProviderId[] = [],
+): Promise<RESTPostAPIChatInputApplicationCommandsJSONBody[]> {
   const baseCommands = [
     buildAskCommand(),
     buildAbortCommand(),
@@ -196,11 +199,15 @@ function buildSlashCommands(skills: SkillSummary[]): RESTPostAPIChatInputApplica
     buildProjectCreateCommand(),
     buildProjectListCommand(),
     buildAccessRequestsCommand(),
-    ...buildAllMultiAuthCommands(),
   ];
 
   const skillCommands = skills.map(buildSkillCommand).filter(Boolean) as RESTPostAPIChatInputApplicationCommandsJSONBody[];
-  return [...baseCommands, ...skillCommands];
+
+  return [
+    ...baseCommands,
+    ...buildAllMultiAuthCommands(providerList),
+    ...skillCommands,
+  ];
 }
 
 function isThreadChannelType(type: ChannelType | null | undefined): boolean {
@@ -691,7 +698,18 @@ export default function picordExtension(pi: ExtensionAPI) {
   async function registerCommandsIfEnabled(): Promise<void> {
     if (!client?.application || !config?.registerCommands || !sessionPool) return;
 
-    const commands = buildSlashCommands(sessionPool.getSkillSummaries());
+    let providerList: SupportedProviderId[] = [];
+    if (multiAuthAccountManager) {
+      try {
+        const allProviders = await multiAuthAccountManager.getSupportedProviders();
+        const excludeSet = new Set(config.multiAuth?.excludeProviders ?? []);
+        providerList = allProviders.filter(p => !excludeSet.has(p));
+      } catch {
+        // ignore errors, proceed with empty list
+      }
+    }
+
+    const commands = await buildSlashCommands(sessionPool.getSkillSummaries(), providerList);
 
     if (config.allowedGuildIds.length > 0) {
       await Promise.all(

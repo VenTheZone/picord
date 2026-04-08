@@ -1,9 +1,16 @@
 import { Client, GatewayIntentBits } from "discord.js";
+import path from "node:path";
 import { loadRuntimeConfig } from "./config.js";
 import { buildDiscordPortCommands } from "./discord-port/command-registration.js";
 import { buildAllMultiAuthCommands } from "./discord-port/multi-auth-commands.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
+import { initMultiAuthConfig } from "./multi-auth/multi-auth-config.js";
+import { buildMultiAuthExtensionConfig } from "./multi-auth/picord-config-adapter.js";
+import { AccountManager } from "./discord-port/multi-auth-integration.js";
+import type { SupportedProviderId } from "./multi-auth/index-export.js";
+
+
 
 async function main(): Promise<void> {
   const config = loadRuntimeConfig(process.cwd(), process.env);
@@ -20,6 +27,25 @@ async function main(): Promise<void> {
   const sessionPool = new PiSessionPool(config, async () => undefined);
   await sessionPool.initialize();
 
+  // Initialize multi-auth if enabled to discover providers
+  let providerList: SupportedProviderId[] = [];
+  if (config.multiAuth?.enabled !== false) {
+    try {
+      const stateDir = path.dirname(config.statePath);
+      initMultiAuthConfig(config.statePath, stateDir);
+      const maConfig = buildMultiAuthExtensionConfig(config.multiAuth ?? {});
+      const maAccountManager = new AccountManager(undefined, undefined, undefined, undefined, undefined, maConfig);
+      await maAccountManager.ensureInitialized();
+      const allProviders = await maAccountManager.getSupportedProviders();
+      const excludeSet = new Set(config.multiAuth?.excludeProviders ?? []);
+      providerList = allProviders.filter(p => !excludeSet.has(p));
+      // No need to shut down explicitly; script will exit
+    } catch (err) {
+      console.error("Failed to initialize multi-auth for command sync:", err);
+      // proceed without provider choices
+    }
+  }
+
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
   try {
@@ -32,7 +58,7 @@ async function main(): Promise<void> {
 
     const commands = [
       ...buildDiscordPortCommands(sessionPool.getSkillSummaries()),
-      ...buildAllMultiAuthCommands(),
+      ...buildAllMultiAuthCommands(providerList),
     ];
 
     console.log("PICORD COMMAND SYNC");

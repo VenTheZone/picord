@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { PicordFileConfig, PicordRuntimeConfig, ThinkingLevel, ToolMode } from "./types.js";
 
-const DEFAULT_THINKING_LEVEL: ThinkingLevel = "off";
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 const DEFAULT_TOOL_MODE: ToolMode = "coding";
 const DEFAULT_WORKSPACE_BASE_PATH = path.join(homedir(), ".picord", "workspace");
 const DEFAULT_HOST_CHANNEL_NAME = "host";

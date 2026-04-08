@@ -14,6 +14,7 @@ export interface LoginProviderOption {
   name: string;
   method: "api-key" | "oauth";
   hasStoredAuth: boolean;
+  credentialCount?: number;
   supportsDiscordFlow?: boolean;
   discordFlowReason?: string;
 }

@@ -17,6 +17,7 @@ import {
 } from "./multi-auth-integration.js";
 import { buildMultiAuthExtensionConfig } from "../multi-auth/picord-config-adapter.js";
 import { multiAuthDebugLogger } from "../multi-auth/debug-logger.js";
+import type { SupportedProviderId } from "../multi-auth/index-export.js";
 
 export interface DiscordPortBridgeHandle {
   client?: Client;
@@ -189,9 +190,19 @@ export async function startDiscordPortExtensionRuntime({
   const registerCommands = async (discordClient: Client) => {
     if (!config.registerCommands || !discordClient.application) return;
     const skillSummaries = adapter.listSkillSummaries();
+    let providerList: SupportedProviderId[] = [];
+    if (multiAuthAccountManager) {
+      try {
+        const allProviders = await multiAuthAccountManager.getSupportedProviders();
+        const excludeSet = new Set(config.multiAuth?.excludeProviders ?? []);
+        providerList = allProviders.filter(p => !excludeSet.has(p));
+      } catch {
+        // ignore errors
+      }
+    }
     const commands = [
       ...buildDiscordPortCommands(skillSummaries),
-      ...buildAllMultiAuthCommands(),
+      ...buildAllMultiAuthCommands(providerList),
     ];
     if (config.allowedGuildIds.length > 0) {
       await Promise.all(config.allowedGuildIds.map((guildId) => discordClient.application!.commands.set(commands, guildId)));

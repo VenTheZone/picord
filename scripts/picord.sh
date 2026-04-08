@@ -4,9 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="picord"
 SERVICE_NAME="picord"
-NODE_BIN="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin/node"
-PI_BIN="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin/pi"
-export PATH="/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin:$PATH"
+# Ensure node and local binaries are in PATH
+export PATH="$HOME/.nix-profile/bin:$HOME/.npm-global/bin:./node_modules/.bin:$PATH"
 export SHELL="/bin/bash"
 
 cd "$ROOT_DIR"
@@ -31,7 +30,7 @@ stop_systemd_if_running() {
 }
 
 start_tmux() {
-  tmux new-session -d -s "$SESSION_NAME" "exec /bin/bash -c 'export PATH=/home/kytusdevenn/.nvm/versions/node/v20.20.2/bin:\$PATH && export SHELL=/bin/bash && cd \"$ROOT_DIR\" && set -a && source .env && set +a && exec \"$NODE_BIN\" \"$PI_BIN\" -e ./src/index.ts --no-session'"
+  tmux new-session -d -s "$SESSION_NAME" "exec /bin/bash -c 'export PATH=$PATH && export SHELL=/bin/bash && cd \"$ROOT_DIR\" && set -a && source .env && set +a && exec node ./node_modules/@mariozechner/pi-coding-agent/dist/cli.js -e ./src/index.ts --no-session'"
 }
 
 cmd_start() {

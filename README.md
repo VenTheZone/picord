@@ -41,6 +41,8 @@ If you remember one thing, remember this:
 
 ## Quick start
 
+For a detailed, step‑by‑step installation guide you can run alongside your pi agent, see [INSTALL.md](INSTALL.md).
+
 ### 1. Install dependencies
 
 ```bash
