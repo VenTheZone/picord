@@ -16,6 +16,12 @@ import type {
 	StoredOAuthCredential,
 	SupportedProviderId,
 } from "./types.js";
+import {
+	decryptString,
+	encryptString,
+	isEncryptedString,
+	isEncryptionAvailable,
+} from "../crypto/encryption.js";
 
 type RawAuthFileData = Record<string, unknown>;
 
@@ -345,6 +351,48 @@ function isStoredCredential(value: unknown): value is StoredAuthCredential {
 	return isOAuthCredential(value) || isApiKeyCredential(value);
 }
 
+/** Decrypts a credential's sensitive fields if they're encrypted. */
+function decryptCredentialFields(credential: StoredAuthCredential): StoredAuthCredential {
+	if (credential.type === "api_key") {
+		if (isEncryptedString(credential.key)) {
+			const decrypted = decryptString(credential.key);
+			return { type: "api_key", key: decrypted ?? "[decryption-failed]" };
+		}
+		return credential;
+	}
+
+	if (credential.type === "oauth") {
+		const access = isEncryptedString(credential.access) ? (decryptString(credential.access) ?? "[decryption-failed]") : credential.access;
+		const refresh = isEncryptedString(credential.refresh) ? (decryptString(credential.refresh) ?? "[decryption-failed]") : credential.refresh;
+		return { type: "oauth", access, refresh, expires: credential.expires };
+	}
+
+	return credential;
+}
+
+/** Encrypts a credential's sensitive fields if encryption is available. */
+function encryptCredentialFields(credential: StoredAuthCredential): StoredAuthCredential {
+	if (!isEncryptionAvailable()) {
+		return credential;
+	}
+
+	if (credential.type === "api_key") {
+		if (isEncryptedString(credential.key)) {
+			return credential; // Already encrypted
+		}
+		const encrypted = encryptString(credential.key);
+		return encrypted ? { type: "api_key", key: encrypted } : credential;
+	}
+
+	if (credential.type === "oauth") {
+		const access = isEncryptedString(credential.access) ? credential.access : (encryptString(credential.access) ?? credential.access);
+		const refresh = isEncryptedString(credential.refresh) ? credential.refresh : (encryptString(credential.refresh) ?? credential.refresh);
+		return { type: "oauth", access, refresh, expires: credential.expires };
+	}
+
+	return credential;
+}
+
 function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -483,7 +531,7 @@ export class AuthWriter {
 			if (!isStoredCredential(credential)) {
 				continue;
 			}
-			credentials.set(credentialId, cloneStoredCredential(credential));
+			credentials.set(credentialId, decryptCredentialFields(cloneStoredCredential(credential)));
 		}
 		return credentials;
 	}
@@ -508,12 +556,14 @@ export class AuthWriter {
 	 * Persists an OAuth credential at the given credential ID.
 	 */
 	async setOAuthCredential(credentialId: string, credential: OAuthCredentials): Promise<void> {
+		const encrypted = encryptCredentialFields({
+			type: "oauth",
+			...credential,
+		});
+
 		await this.withLock((data) => {
 			const next = cloneAuthData(data);
-			next[credentialId] = {
-				type: "oauth",
-				...credential,
-			};
+			next[credentialId] = encrypted;
 			return { result: undefined, next };
 		});
 	}
@@ -527,12 +577,14 @@ export class AuthWriter {
 			throw new Error("API key cannot be empty.");
 		}
 
+		const encrypted = encryptCredentialFields({
+			type: "api_key",
+			key: normalized,
+		});
+
 		await this.withLock((data) => {
 			const next = cloneAuthData(data);
-			next[credentialId] = {
-				type: "api_key",
-				key: normalized,
-			};
+			next[credentialId] = encrypted;
 			return { result: undefined, next };
 		});
 	}
@@ -547,10 +599,10 @@ export class AuthWriter {
 		return this.withLock((data) => {
 			const next = cloneAuthData(data);
 			const destination = this.getBackupDestinationCredentialId(provider, next);
-			next[destination.credentialId] = {
+			next[destination.credentialId] = encryptCredentialFields({
 				type: "oauth",
 				...credential,
-			};
+			});
 
 			const credentialIds = this.listProviderCredentialIdsFromData(provider, next);
 			return {
@@ -620,7 +672,7 @@ export class AuthWriter {
 			const credentialIds: string[] = [];
 			for (const [index, credential] of uniqueCredentials.entries()) {
 				const credentialId = index === 0 ? provider : `${provider}-${index}`;
-				next[credentialId] = credential;
+				next[credentialId] = encryptCredentialFields(credential);
 				credentialIds.push(credentialId);
 			}
 
@@ -701,7 +753,7 @@ export class AuthWriter {
 			const credentialIdMap: Record<string, string> = {};
 			for (const [index, entry] of retainedEntries.entries()) {
 				const credentialId = getExpectedProviderCredentialId(provider, index);
-				next[credentialId] = entry.credential;
+				next[credentialId] = encryptCredentialFields(entry.credential);
 				normalizedCredentialIds.push(credentialId);
 				credentialIdMap[entry.credentialId] = credentialId;
 			}
@@ -831,7 +883,7 @@ export class AuthWriter {
 			}
 			entries.push({
 				credentialId,
-				credential: cloneStoredCredential(credential),
+				credential: decryptCredentialFields(cloneStoredCredential(credential)),
 			});
 		}
 		return entries;

@@ -11,11 +11,16 @@ describe("discord command sync payload", () => {
 
     const names = commands.map((command) => command.name);
     expect(names).toContain("multi-auth");
-    expect(names).toContain("multi-auth-delete");
-    expect(names).toContain("multi-auth-switch");
-    expect(names).toContain("multi-auth-auto");
-    expect(names).toContain("multi-auth-rename");
-    expect(names).toContain("multi-auth-rotation");
-    expect(names).toContain("multi-auth-hide");
+    // multi-auth is a single command with subcommands
+    const multiAuthCommand = commands.find((c) => c.name === "multi-auth");
+    expect(multiAuthCommand).toBeDefined();
+    // Verify subcommands exist
+    const subcommands = (multiAuthCommand as any).options?.map((o: any) => o.name) ?? [];
+    expect(subcommands).toContain("delete");
+    expect(subcommands).toContain("switch");
+    expect(subcommands).toContain("auto");
+    expect(subcommands).toContain("rename");
+    expect(subcommands).toContain("rotation");
+    expect(subcommands).toContain("hide");
   });
 });

@@ -2,6 +2,15 @@
 
 This guide helps you install and configure picord from source, working alongside your pi agent.
 
+[!NOTE]
+If you already have **pi** installed and running, you can install picord directly from your pi agent by running:
+
+```bash
+pi install npm:@venthezone/picord
+```
+
+Then configure it as described below.
+
 ## Prerequisites
 
 - Node.js 20.6 or newer
@@ -69,6 +78,23 @@ export PICORD_DISCORD_APPLICATION_ID="your-application-id"
 ```
 
 The environment overrides config file values.
+
+### Encryption Key (Recommended)
+
+To encrypt stored credentials, set `PICORD_ENCRYPTION_KEY`:
+
+```bash
+# Generate a secure key
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# Set it as an environment variable
+export PICORD_ENCRYPTION_KEY="your-generated-key-here"
+```
+
+**Important:**
+- Store this key securely (e.g., in a password manager)
+- Without this key, credentials are stored in plaintext
+- If you lose the key, encrypted credentials cannot be recovered
 
 ---
 
@@ -163,6 +189,10 @@ Credentials are stored encrypted in `picord.state.json` (local only).
 - All credentials stay in `picord.state.json` on your machine
 - Multi-auth only sends credentials to the respective provider APIs (OpenAI, Anthropic, etc.) during normal operation
 - No telemetry is sent to remotepicord servers
+
+**Credentials stored in plaintext warning:**
+- Set `PICORD_ENCRYPTION_KEY` environment variable to enable encryption
+- Run `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` to generate a key
 
 ---
 

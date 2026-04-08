@@ -71,6 +71,8 @@ export interface DiscordPortRuntimeAdapter {
   setWorkspaceThinkingLevel(workspaceKey: string, thinkingLevel: ThinkingLevel): void;
   setConversationThinkingLevel(conversationKey: string, workspaceKey: string, thinkingLevel: ThinkingLevel): void;
   getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel;
+  setThinkingVisibility(conversationKey: string, visible: boolean): void;
+  getThinkingVisibility(conversationKey: string): boolean;
   listLoginProviders(): LoginProviderOption[];
   setProviderApiKey(providerId: string, apiKey: string): void;
   startProviderOAuthLogin(providerId: string, userId: string): Promise<{ url: string; instructions?: string; pendingPrompt?: { message: string; placeholder?: string; allowEmpty?: boolean } }>;

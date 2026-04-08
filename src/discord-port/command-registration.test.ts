@@ -12,7 +12,6 @@ describe("buildDiscordPortCommands", () => {
     expect(names).toContain("refresh-session");
     expect(names).toContain("model");
     expect(names).toContain("think");
-    expect(names).toContain("login");
     expect(names).toContain("session");
     expect(names).toContain("outside-workspace-access");
     expect(names).not.toContain("login-complete");

@@ -15,6 +15,7 @@ const RESERVED_COMMAND_NAMES = new Set([
   "scope-models",
   "use-model",
   "think",
+  "think-visibility",
   "login",
   "reload",
   "restart",
@@ -116,10 +117,17 @@ function buildThinkCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
     .toJSON();
 }
 
-function buildLoginCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+function buildThinkingVisibilityCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("think-visibility")
+    .setDescription("Toggle whether to show thinking process in the chat")
+    .toJSON();
+}
+
+export function buildLoginCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("login")
-    .setDescription("Choose a provider and update its login or API key")
+    .setDescription("Add or update API keys and OAuth credentials for providers")
     .toJSON();
 }
 
@@ -308,20 +316,6 @@ function buildStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
     .toJSON();
 }
 
-function buildUsageCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder()
-    .setName("usage")
-    .setDescription("Show API usage and rate limits for multi-auth credentials")
-    .addStringOption((option) =>
-      option
-        .setName("provider")
-        .setDescription("Optional: filter by a specific provider")
-        .setRequired(false)
-        .setAutocomplete(true),
-    )
-    .toJSON();
-}
-
 export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
   return [
     buildAskCommand(),
@@ -329,6 +323,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildUseModelCommand(),
     buildUseModelCommand("model"),
     buildThinkCommand(),
+    buildThinkingVisibilityCommand(),
     buildLoginCommand(),
     buildReloadCommand(),
     buildRestartCommand(),
@@ -348,7 +343,6 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildAccessRequestsCommand(),
     buildOutsideWorkspaceAccessCommand(),
     buildStatusCommand(),
-    buildUsageCommand(),
     buildCompactCommand(),
     buildAutoCompactCommand(),
     ...skills.map(buildSkillCommand).filter((command): command is RESTPostAPIChatInputApplicationCommandsJSONBody => Boolean(command)),

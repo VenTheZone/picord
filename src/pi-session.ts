@@ -23,7 +23,7 @@ import { AccessApprovalManager } from "./access-approval.js";
 import type { AccessContext } from "./path-policy.js";
 import { WorkspaceGuard } from "./path-policy.js";
 import { createDiscordExtensionBindings, notifyExtensionBindingFailure } from "./extension-bindings.js";
-import { filterOutPicordExtensions } from "./pi-resource-loader.js";
+import { filterOutPicordExtensions, getPicordPackageRoot } from "./pi-resource-loader.js";
 import { createSafeCustomTools } from "./safe-tools.js";
 import type {
   ModelSummary,
@@ -148,6 +148,7 @@ export class PiSessionPool {
   private readonly workspaces = new Map<string, WorkspaceState>();
   private readonly conversationModels = new Map<string, { provider: string; id: string }>();
   private readonly conversationThinkingLevels = new Map<string, ThinkingLevel>();
+  private readonly conversationThinkingVisibility = new Map<string, boolean>();
   private readonly approvals: AccessApprovalManager;
   private readonly registry: WorkspaceRegistry;
   private readonly pendingOAuthLogins = new Map<string, PendingOAuthLogin>();
@@ -570,6 +571,22 @@ export class PiSessionPool {
             return;
           }
 
+          if (event.assistantMessageEvent.type === "thinking_delta") {
+            const delta = event.assistantMessageEvent.delta;
+            enqueueUpdate({ type: "thinking_delta", delta });
+            return;
+          }
+
+          if (event.assistantMessageEvent.type === "thinking_start") {
+            enqueueUpdate({ type: "thinking_start" });
+            return;
+          }
+
+          if (event.assistantMessageEvent.type === "thinking_end") {
+            enqueueUpdate({ type: "thinking_end" });
+            return;
+          }
+
           enqueueRunState();
           return;
         }
@@ -842,6 +859,14 @@ export class PiSessionPool {
       ?? this.config.thinkingLevel;
   }
 
+  setThinkingVisibility(conversationKey: string, visible: boolean): void {
+    this.conversationThinkingVisibility.set(conversationKey, visible);
+  }
+
+  getThinkingVisibility(conversationKey: string): boolean {
+    return this.conversationThinkingVisibility.get(conversationKey) ?? false; // default hidden
+  }
+
   getBlockedPathPatterns(): string[] {
     return [...this.config.blockedPathPatterns];
   }
@@ -921,12 +946,14 @@ export class PiSessionPool {
     if (existing) return existing;
 
     const settingsManager = SettingsManager.create(root);
+    const picordSkillsPath = path.join(getPicordPackageRoot(), "skills");
     const resourceLoader = new DefaultResourceLoader({
       cwd: root,
       settingsManager,
       noThemes: true,
       appendSystemPrompt: buildSystemPrompt(this.config),
       extensionsOverride: (base) => filterOutPicordExtensions(base),
+      additionalSkillPaths: [picordSkillsPath],
     });
     await resourceLoader.reload();
 

@@ -19,6 +19,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
+import { isEncryptionAvailable } from "../crypto/encryption.js";
 
 import { LiveDiscordRunRenderer, createInteractionLiveMessageTarget } from "../live-discord-renderer.js";
 import {
@@ -135,7 +136,7 @@ export function buildOAuthLoginEmbed({
 
 // --- Usage command helpers ---
 
-async function getUsageOverview(accountManager: AccountManager): Promise<Record<string, string>> {
+async function _getUsageOverview(accountManager: AccountManager): Promise<Record<string, string>> {
   const providers = await accountManager.getSupportedProviders();
   const usageMap: Record<string, string> = {};
 
@@ -185,7 +186,7 @@ async function getUsageOverview(accountManager: AccountManager): Promise<Record<
   return usageMap;
 }
 
-function buildUsageEmbed(usageMap: Record<string, string>): EmbedBuilder {
+function _buildUsageEmbed(usageMap: Record<string, string>): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setTitle("Credential Usage / Quota")
     .setColor(0x5865f2)
@@ -262,7 +263,6 @@ function isOwnerAdminCommand(commandName: string): boolean {
   return [
     "reload",
     "restart",
-    "login",
     "project-create",
     "add-project",
     "add-project-path",
@@ -371,6 +371,7 @@ export function buildLoginProviderLines(providers: Array<{
   hasStoredAuth: boolean;
   supportsDiscordFlow?: boolean;
   discordFlowReason?: string;
+  credentialCount?: number;
 }>): string[] {
   return [
     "Choose a provider to log in or update.",
@@ -379,9 +380,101 @@ export function buildLoginProviderLines(providers: Array<{
       const suffix = provider.supportsDiscordFlow === false
         ? `, local-only: ${provider.discordFlowReason ?? "not available in Discord yet"}`
         : "";
-      return `- ${provider.name} (${status}${suffix})`;
+      const countStr = provider.credentialCount ? ` [${provider.credentialCount} credential${provider.credentialCount === 1 ? "" : "s"}]` : "";
+      return `- ${provider.name}${countStr} (${status}${suffix})`;
     }),
   ];
+}
+
+async function handleLoginCommand(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+  multiAuthAccountManager: AccountManager | undefined,
+): Promise<void> {
+  requireGuild(interaction);
+  const baseProviders = runtime.adapter.listLoginProviders();
+  const providerMap = new Map(baseProviders.map((p) => [p.id, p]));
+
+  if (multiAuthAccountManager) {
+    try {
+      const maProviders = await multiAuthAccountManager.getSupportedProviders();
+      const registry = multiAuthAccountManager.getProviderRegistry();
+      const allOAuthProviders = getOAuthProviders();
+      const oauthById = new Map(allOAuthProviders.map((p) => [p.id.trim(), p]));
+
+      for (const providerId of maProviders) {
+        if (providerMap.has(providerId)) continue;
+
+        const capabilities = registry.getProviderCapabilities(providerId);
+        let method: "api-key" | "oauth" = capabilities.supportsOAuth ? "oauth" : "api-key";
+        let name = providerId;
+        let supportsDiscordFlow: boolean | undefined;
+
+        if (method === "oauth") {
+          const oauthInfo = oauthById.get(providerId);
+          if (oauthInfo) {
+            name = oauthInfo.name.trim() || providerId;
+            // multi-auth OAuth providers support Discord flow (device code)
+            supportsDiscordFlow = true;
+          } else {
+            // OAuth provider not in pi's OAuth registry; fallback to api-key
+            method = "api-key";
+          }
+        }
+
+        let hasStoredAuth = false;
+        let credentialCount: number | undefined;
+        try {
+          const status = await multiAuthAccountManager.getProviderStatus(providerId);
+          hasStoredAuth = status.credentials.length > 0;
+          credentialCount = status.credentials.length;
+        } catch {
+          // ignore
+        }
+
+        providerMap.set(providerId, {
+          id: providerId,
+          name,
+          method,
+          hasStoredAuth,
+          credentialCount,
+          supportsDiscordFlow,
+        } as LoginProviderOption);
+      }
+    } catch {
+      // ignore errors, use baseProviders only
+    }
+  }
+
+  const providers = Array.from(providerMap.values());
+  if (providers.length === 0) {
+    await interaction.reply({
+      content: "No login providers are available.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(LOGIN_PROVIDER_SELECT)
+    .setPlaceholder("Choose a provider to log in or replace its API key")
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(...providers.slice(0, 25).map((provider) => {
+      const countLabel = provider.credentialCount ? ` (${provider.credentialCount})` : "";
+      const label = (provider.name + countLabel).slice(0, 100);
+      const description = `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100);
+      return { label, value: provider.id, description };
+    }));
+
+  await interaction.reply({
+    content: [
+      ...buildLoginProviderLines(providers),
+      multiAuthAccountManager ? "\n💡 New credentials will be added to multi-auth for automatic rotation." : "",
+    ].filter(Boolean).join("\n"),
+    flags: MessageFlags.Ephemeral,
+    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+  });
 }
 
 export function buildAccessRequestLines(request: { id: string; summary: string }): string[] {
@@ -494,7 +587,7 @@ export function registerDiscordPortInteractionHandler({
           return;
         }
 
-        if (interaction.commandName === "usage" && focused.name === "provider") {
+        if (interaction.commandName === "multi-auth" && focused.name === "provider") {
           if (!multiAuthAccountManager) {
             await interaction.respond([]);
             return;
@@ -953,9 +1046,26 @@ export function registerDiscordPortInteractionHandler({
 
         if (interaction.customId.startsWith(LOGIN_API_KEY_MODAL_PREFIX)) {
           const providerId = interaction.customId.slice(LOGIN_API_KEY_MODAL_PREFIX.length);
-          runtime.adapter.setProviderApiKey(providerId, interaction.fields.getTextInputValue("apiKey"));
+          const apiKey = interaction.fields.getTextInputValue("apiKey");
+          runtime.adapter.setProviderApiKey(providerId, apiKey);
+          const messages = [`✅ Stored API key for **${providerId}**.`];
+          if (!isEncryptionAvailable()) {
+            messages.push("⚠️ **Credentials stored in plaintext.** Set `PICORD_ENCRYPTION_KEY` env var to encrypt.");
+          }
+          if (multiAuthAccountManager) {
+            try {
+              await multiAuthAccountManager.addApiKeyCredential(providerId as SupportedProviderId, apiKey);
+              messages.push("🔄 Added to multi-auth rotation.");
+              const status = await multiAuthAccountManager.getProviderStatus(providerId as SupportedProviderId);
+              if (status.credentials.length > 0) {
+                messages.push(`📊 **${status.credentials.length}** credential${status.credentials.length === 1 ? "" : "s"} now available for ${providerId}.`);
+              }
+            } catch (error) {
+              messages.push(`⚠️ Failed to sync to multi-auth: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
           await interaction.reply({
-            content: `Stored API key for ${providerId}.`,
+            content: messages.join("\n"),
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -971,8 +1081,11 @@ export function registerDiscordPortInteractionHandler({
             await interaction.editReply({ content: `${provider?.name ?? providerId} prompt answer submitted. Finish the browser/device step, then use Complete login.` });
             return;
           }
-          await runtime.adapter.completeProviderOAuthLogin(providerId, interaction.user.id, interaction.fields.getTextInputValue("code"));
-          await interaction.editReply({ content: `${provider?.name ?? providerId} login completed successfully.` });
+          const code = interaction.fields.getTextInputValue("code");
+          await runtime.adapter.completeProviderOAuthLogin(providerId, interaction.user.id, code);
+          await interaction.editReply({
+            content: `${provider?.name ?? providerId} login completed successfully.`,
+          });
           return;
         }
       } catch (error) {
@@ -1076,89 +1189,13 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
-      if (interaction.commandName === "login") {
-        requireGuild(interaction);
-        const baseProviders = runtime.adapter.listLoginProviders();
-        const providerMap = new Map(baseProviders.map(p => [p.id, p]));
-
-        if (multiAuthAccountManager) {
-          try {
-            const maProviders = await multiAuthAccountManager.getSupportedProviders();
-            const registry = multiAuthAccountManager.getProviderRegistry();
-            const allOAuthProviders = getOAuthProviders();
-            const oauthById = new Map(allOAuthProviders.map(p => [p.id.trim(), p]));
-
-            for (const providerId of maProviders) {
-              if (providerMap.has(providerId)) continue;
-
-              const capabilities = registry.getProviderCapabilities(providerId);
-              let method: "api-key" | "oauth" = capabilities.supportsOAuth ? "oauth" : "api-key";
-              let name = providerId;
-              let supportsDiscordFlow: boolean | undefined;
-
-              if (method === "oauth") {
-                const oauthInfo = oauthById.get(providerId);
-                if (oauthInfo) {
-                  name = oauthInfo.name.trim() || providerId;
-                  // Assume multi-auth OAuth providers support Discord flow (device code)
-                  supportsDiscordFlow = true;
-                } else {
-                  // OAuth provider not in pi's OAuth registry; fallback to api-key
-                  method = "api-key";
-                }
-              }
-
-              let hasStoredAuth = false;
-              let credentialCount: number | undefined;
-              try {
-                const status = await multiAuthAccountManager.getProviderStatus(providerId);
-                hasStoredAuth = status.credentials.length > 0;
-                credentialCount = status.credentials.length;
-              } catch {
-                // ignore
-              }
-
-              providerMap.set(providerId, {
-                id: providerId,
-                name,
-                method,
-                hasStoredAuth,
-                credentialCount,
-                supportsDiscordFlow,
-              } as LoginProviderOption);
-            }
-          } catch {
-            // ignore errors, use baseProviders only
-          }
-        }
-
-        const providers = Array.from(providerMap.values());
-        if (providers.length === 0) {
-          await interaction.reply({
-            content: "No login providers are available.",
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        const menu = new StringSelectMenuBuilder()
-          .setCustomId(LOGIN_PROVIDER_SELECT)
-          .setPlaceholder("Choose a provider to log in or replace its API key")
-          .setMinValues(1)
-          .setMaxValues(1)
-          .addOptions(...providers.slice(0, 25).map((provider) => {
-            const countLabel = provider.credentialCount ? ` (${provider.credentialCount})` : "";
-            const label = (provider.name + countLabel).slice(0, 100);
-            const description = `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100);
-            return { label, value: provider.id, description };
-          }));
-
-        await interaction.reply({
-          content: buildLoginProviderLines(providers).join("\n"),
-          flags: MessageFlags.Ephemeral,
-          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
-        });
+      if (interaction.commandName === "multi-auth") {
+        await handleMultiAuthCommand(interaction, multiAuthAccountManager!);
         return;
+      }
+
+      if (interaction.commandName === "login") {
+        return await handleLoginCommand(interaction, runtime, multiAuthAccountManager);
       }
 
       if (interaction.commandName === "project-create") {
@@ -1403,6 +1440,23 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
+      if (interaction.commandName === "think-visibility") {
+        const thread = requireSessionThreadIfGuild(interaction);
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const currentVisible = runtime.adapter.getThinkingVisibility(conversationKey);
+        const newVisible = !currentVisible;
+        runtime.adapter.setThinkingVisibility(conversationKey, newVisible);
+        await interaction.reply({
+          content: `Thinking visibility is now ${newVisible ? "shown" : "hidden"}.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       if (interaction.commandName === "ask") {
         const thread = requireSessionThreadIfGuild(interaction);
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
@@ -1428,7 +1482,8 @@ export function registerDiscordPortInteractionHandler({
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+        const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
+        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction), { thinkingVisible });
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
         try {
           const response = await runtime.adapter.respond({
@@ -1667,38 +1722,6 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
-      // usage command
-      if (interaction.commandName === "usage") {
-        if (!multiAuthAccountManager) {
-          await replyToInteraction(interaction, "Multi-auth is not enabled.");
-          return;
-        }
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        try {
-          const usageMap = await getUsageOverview(multiAuthAccountManager);
-          const providerFilter = interaction.options.getString("provider")?.trim();
-          let finalMap = usageMap;
-          if (providerFilter) {
-            const filtered: Record<string, string> = {};
-            for (const [key, value] of Object.entries(usageMap)) {
-              if (key.startsWith(providerFilter + "/") || key === providerFilter) {
-                filtered[key] = value;
-              }
-            }
-            if (Object.keys(filtered).length === 0) {
-              await interaction.editReply({ content: `No usage data found for provider \`${providerFilter}\`.` });
-              return;
-            }
-            finalMap = filtered;
-          }
-          await interaction.editReply({ embeds: [buildUsageEmbed(finalMap)] });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          await interaction.editReply({ content: `Error: ${message}` });
-        }
-        return;
-      }
-
       if (interaction.commandName.startsWith("multi-auth") && multiAuthAccountManager) {
         await handleMultiAuthCommand(interaction, multiAuthAccountManager);
         return;
@@ -1726,7 +1749,8 @@ export function registerDiscordPortInteractionHandler({
         const skillArgs = interaction.options.getString("prompt")?.trim();
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+        const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
+        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction), { thinkingVisible });
         renderer.setSkillContext(skillCommand.name, skillArgs);
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
         try {
@@ -1745,17 +1769,17 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "compact" || interaction.commandName === "auto-compact") {
-        requireGuild(interaction);
-        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
-        if (!thread && !interaction.guildId) {
-          throw new Error("Context compaction is only available in session threads or project channels.");
-        }
+        const thread = requireSessionThreadIfGuild(interaction);
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
 
-        const binding = runtime.bindThread(thread as never);
         if (interaction.commandName === "compact") {
           await interaction.deferReply({ flags: MessageFlags.Ephemeral });
           try {
-            const success = await runtime.adapter.compactSession(binding.conversationKey);
+            const success = await runtime.adapter.compactSession(conversationKey);
             await interaction.editReply({
               content: success
                 ? "✅ Context compaction completed successfully."
@@ -1768,8 +1792,8 @@ export function registerDiscordPortInteractionHandler({
           return;
         }
 
-        const currentEnabled = runtime.adapter.getAutoCompactionEnabled(binding.conversationKey);
-        runtime.adapter.setAutoCompactionEnabled(binding.conversationKey, !currentEnabled);
+        const currentEnabled = runtime.adapter.getAutoCompactionEnabled(conversationKey);
+        runtime.adapter.setAutoCompactionEnabled(conversationKey, !currentEnabled);
         await interaction.reply({
           content: `♻️ Automatic compaction is now ${currentEnabled ? "disabled" : "enabled"}.`,
           flags: MessageFlags.Ephemeral,

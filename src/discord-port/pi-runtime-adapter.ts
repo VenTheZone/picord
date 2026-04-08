@@ -115,6 +115,14 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.getEffectiveThinkingLevel(conversationKey, workspaceKey);
   }
 
+  setThinkingVisibility(conversationKey: string, visible: boolean): void {
+    this.sessionPool.setThinkingVisibility(conversationKey, visible);
+  }
+
+  getThinkingVisibility(conversationKey: string): boolean {
+    return this.sessionPool.getThinkingVisibility(conversationKey);
+  }
+
   listLoginProviders(): LoginProviderOption[] {
     return this.sessionPool.listLoginProviders();
   }

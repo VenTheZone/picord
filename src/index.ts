@@ -28,6 +28,7 @@ import {
   initMultiAuthConfig,
   multiAuthDebugLogger,
 } from "./discord-port/multi-auth-integration.js";
+import { isEncryptionAvailable } from "./crypto/encryption.js";
 import { LiveDiscordRunRenderer, createChannelLiveMessageTarget, createInteractionLiveMessageTarget, type PiLiveUpdate } from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
@@ -1300,6 +1301,10 @@ export default function picordExtension(pi: ExtensionAPI) {
         }
 
         ctx.ui.notify("multi-auth credentials loaded.", "info");
+      }
+
+      if (!isEncryptionAvailable()) {
+        ctx.ui.notify("⚠️ PICORD_ENCRYPTION_KEY not set. Credentials stored in plaintext.", "warning");
       }
 
       client = createDiscordClient(true);

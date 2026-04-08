@@ -5,7 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="picord"
 SERVICE_NAME="picord"
 # Ensure node and local binaries are in PATH
-export PATH="$HOME/.nix-profile/bin:$HOME/.npm-global/bin:./node_modules/.bin:$PATH"
+export PATH="./node_modules/.bin:$PATH"
+# Add user npm global bin if it exists
+if [ -d "$HOME/.npm-global/bin" ]; then
+  export PATH="$HOME/.npm-global/bin:$PATH"
+fi
+# Add nix profile if it exists
+if [ -d "$HOME/.nix-profile/bin" ]; then
+  export PATH="$HOME/.nix-profile/bin:$PATH"
+fi
 export SHELL="/bin/bash"
 
 cd "$ROOT_DIR"

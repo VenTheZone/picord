@@ -6,6 +6,9 @@ const RESPONSE_PLACEHOLDER = "_thinking…_";
 
 export type PiLiveUpdate =
   | { type: "assistant_delta"; delta: string }
+  | { type: "thinking_start" }
+  | { type: "thinking_delta"; delta: string }
+  | { type: "thinking_end" }
   | { type: "run_state"; modelReference?: string; thinkingLevel?: string; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_update"; toolCallId: string; toolName: string; args?: unknown; detail?: unknown }
@@ -26,12 +29,17 @@ interface AssistantEntry {
   text: string;
 }
 
+interface ThinkingEntry {
+  kind: "thinking";
+  text: string;
+}
+
 interface ToolTimelineEntry {
   kind: "tool";
   tool: ToolEntry;
 }
 
-type TimelineEntry = AssistantEntry | ToolTimelineEntry;
+type TimelineEntry = AssistantEntry | ThinkingEntry | ToolTimelineEntry;
 
 export interface LiveMessagePayload {
   content?: string;
@@ -310,6 +318,9 @@ export class LiveDiscordRunRenderer {
   private readonly timeline: TimelineEntry[] = [];
   private readonly handles: EditableMessageHandle[] = [];
   private activeAssistantEntry?: AssistantEntry;
+  private activeThinkingEntry?: ThinkingEntry;
+  private thinkingActive = false;
+  private thinkingVisible: boolean;
   private flushTimer?: NodeJS.Timeout;
   private flushPromise: Promise<void> = Promise.resolve();
   private finalized = false;
@@ -321,7 +332,9 @@ export class LiveDiscordRunRenderer {
   private runContextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   private accessRequest?: { content: string; requestId?: string; handle?: EditableMessageHandle };
 
-  constructor(private readonly target: LiveMessageTarget) {}
+  constructor(private readonly target: LiveMessageTarget, options?: { thinkingVisible?: boolean }) {
+    this.thinkingVisible = options?.thinkingVisible ?? false;
+  }
 
   setSkillContext(skillName: string, args?: string): void {
     this.skillLabel = skillName;
@@ -376,6 +389,32 @@ export class LiveDiscordRunRenderer {
       this.sawAssistantDelta = true;
       this.activeAssistantEntry ??= this.createAssistantEntry();
       this.activeAssistantEntry.text += update.delta;
+      this.scheduleFlush();
+      return;
+    }
+
+    if (update.type === "thinking_start") {
+      this.thinkingActive = true;
+      if (this.thinkingVisible) {
+        this.activeThinkingEntry = { kind: "thinking", text: "" };
+        this.timeline.push(this.activeThinkingEntry);
+      }
+      this.scheduleFlush();
+      return;
+    }
+
+    if (update.type === "thinking_delta") {
+      if (!update.delta) return;
+      if (this.thinkingVisible && this.activeThinkingEntry) {
+        this.activeThinkingEntry.text += update.delta;
+      }
+      this.scheduleFlush();
+      return;
+    }
+
+    if (update.type === "thinking_end") {
+      this.thinkingActive = false;
+      this.activeThinkingEntry = undefined;
       this.scheduleFlush();
       return;
     }
@@ -480,7 +519,19 @@ export class LiveDiscordRunRenderer {
         continue;
       }
 
+      if (entry.kind === "thinking") {
+        const text = entry.text.trim();
+        if (!text) continue;
+        lines.push(`🧠 Thinking:\n${text}`, "");
+        continue;
+      }
+
       lines.push(formatToolLine(entry.tool), "");
+    }
+
+    // Show thinking placeholder when thinking is active but hidden
+    if (this.thinkingActive && !this.thinkingVisible) {
+      lines.push("🧠 Thinking...", "");
     }
 
     const contextLine = this.runContextUsage

@@ -2,6 +2,7 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   EmbedBuilder,
+  MessageFlags,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import type {
@@ -16,8 +17,8 @@ const MAX_FIELD_VALUE_LENGTH = 1024;
 // Command builders
 // ---------------------------------------------------------------------------
 
-export function buildMultiAuthStatusCommand(_providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder()
+export function buildMultiAuthCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  const builder = new SlashCommandBuilder()
     .setName("multi-auth")
     .setDescription("Manage multi-auth credentials and rotation")
     .addSubcommand((sub) =>
@@ -27,143 +28,81 @@ export function buildMultiAuthStatusCommand(_providers: SupportedProviderId[] = 
       sub.setName("usage").setDescription("Show usage/quota for all or a specific provider credential"),
     )
     .addSubcommand((sub) => sub.setName("health").setDescription("Show credential health scores"))
-    .toJSON();
-}
-
-export function buildMultiAuthAddApikeyCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-add-apikey")
-    .setDescription("Add an API key credential")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id, e.g. anthropic, openai-codex").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addStringOption((o) => o.setName("key").setDescription("The API key").setRequired(true))
-    .addStringOption((o) => o.setName("name").setDescription("Optional friendly name for the credential").setRequired(false));
-  return builder.toJSON();
-}
-
-export function buildMultiAuthDeleteCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-delete")
-    .setDescription("Delete credential(s)")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addStringOption((o) => o.setName("credential").setDescription("Credential ID to delete").setRequired(true));
-  return builder.toJSON();
-}
-
-export function buildMultiAuthSwitchCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-switch")
-    .setDescription("Switch the active credential for a provider")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addIntegerOption((o) => o.setName("index").setDescription("Credential index (0-based)").setRequired(true));
-  return builder.toJSON();
-}
-
-export function buildMultiAuthAutoCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-auto")
-    .setDescription("Return a provider to automatic credential rotation")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    });
-  return builder.toJSON();
-}
-
-export function buildMultiAuthRenameCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-rename")
-    .setDescription("Set a friendly name for a credential")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addStringOption((o) => o.setName("credential").setDescription("Credential ID").setRequired(true))
-    .addStringOption((o) => o.setName("name").setDescription("Friendly display name").setRequired(true));
-  return builder.toJSON();
-}
-
-export function buildMultiAuthRotationCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-rotation")
-    .setDescription("Set the rotation mode for a provider")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addStringOption((o) =>
-      o
-        .setName("mode")
-        .setDescription("Rotation strategy")
-        .setRequired(true)
-        .addChoices(
-          { name: "round-robin", value: "round-robin" },
-          { name: "usage-based", value: "usage-based" },
-          { name: "balancer (health)", value: "balancer" },
-        ),
+    .addSubcommand((sub) =>
+      sub.setName("delete").setDescription("Delete a credential").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }).addStringOption((o) => o.setName("credential").setDescription("Credential ID to delete").setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("switch").setDescription("Switch the active credential for a provider").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }).addIntegerOption((o) => o.setName("index").setDescription("Credential index (0-based)").setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("auto").setDescription("Return a provider to automatic credential rotation").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("rename").setDescription("Set a friendly name for a credential").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }).addStringOption((o) => o.setName("credential").setDescription("Credential ID").setRequired(true)).addStringOption((o) => o.setName("name").setDescription("Friendly display name").setRequired(true)),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("rotation").setDescription("Set the rotation mode for a provider").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }).addStringOption((o) =>
+        o.setName("mode")
+          .setDescription("Rotation strategy")
+          .setRequired(true)
+          .addChoices(
+            { name: "round-robin", value: "round-robin" },
+            { name: "usage-based", value: "usage-based" },
+            { name: "balancer (health)", value: "balancer" },
+          ),
+      ),
+    )
+    .addSubcommand((sub) =>
+      sub.setName("hide").setDescription("Hide or unhide a provider from status output").addStringOption((o) => {
+        const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
+        if (providers.length > 0) {
+          const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
+          opt.addChoices(...choices);
+        }
+        return opt;
+      }).addBooleanOption((o) => o.setName("hidden").setDescription("Whether to hide (default true)").setRequired(false)),
     );
   return builder.toJSON();
 }
 
-export function buildMultiAuthHideCommand(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  const builder = new SlashCommandBuilder()
-    .setName("multi-auth-hide")
-    .setDescription("Hide or unhide a provider from status output")
-    .addStringOption((o) => {
-      const opt = o.setName("provider").setDescription("Provider id").setRequired(true);
-      if (providers.length > 0) {
-        const choices = providers.slice(0, 25).map((p) => ({ name: p, value: p }));
-        opt.addChoices(...choices);
-      }
-      return opt;
-    })
-    .addBooleanOption((o) => o.setName("hidden").setDescription("Whether to hide (default true)").setRequired(false));
-  return builder.toJSON();
-}
-
+// All multi-auth functionality is under the single /multi-auth command.
 export function buildAllMultiAuthCommands(providers: SupportedProviderId[] = []): RESTPostAPIChatInputApplicationCommandsJSONBody[] {
-  return [
-    buildMultiAuthStatusCommand(providers),
-    // Note: /multi-auth-add-apikey removed; use /login instead
-    buildMultiAuthDeleteCommand(providers),
-    buildMultiAuthSwitchCommand(providers),
-    buildMultiAuthAutoCommand(providers),
-    buildMultiAuthRenameCommand(providers),
-    buildMultiAuthRotationCommand(providers),
-    buildMultiAuthHideCommand(providers),
-  ];
+  return [buildMultiAuthCommand(providers)];
 }
 
 // ---------------------------------------------------------------------------
@@ -255,31 +194,28 @@ export async function handleMultiAuthCommand(
 ): Promise<void> {
   if (!interaction.isChatInputCommand()) return;
 
-  const cmd = interaction.commandName;
+  const subcmd = interaction.options.getSubcommand();
 
-  if (cmd === "multi-auth") {
-    return handleMultiAuthStatus(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-add-apikey") {
-    return handleAddApikey(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-delete") {
-    return handleDelete(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-switch") {
-    return handleSwitch(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-auto") {
-    return handleAuto(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-rename") {
-    return handleRename(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-rotation") {
-    return handleRotation(interaction, accountManager);
-  }
-  if (cmd === "multi-auth-hide") {
-    return handleHide(interaction, accountManager);
+  switch (subcmd) {
+    case "status":
+    case "usage":
+    case "health":
+      return await handleMultiAuthStatus(interaction, accountManager);
+    case "delete":
+      return await handleDelete(interaction, accountManager);
+    case "switch":
+      return await handleSwitch(interaction, accountManager);
+    case "auto":
+      return await handleAuto(interaction, accountManager);
+    case "rename":
+      return await handleRename(interaction, accountManager);
+    case "rotation":
+      return await handleRotation(interaction, accountManager);
+    case "hide":
+      return await handleHide(interaction, accountManager);
+    default:
+      // Unknown subcommand; do nothing or could reply with error
+      await interaction.reply({ content: `Unknown subcommand: ${subcmd}`, flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -312,38 +248,6 @@ async function handleMultiAuthStatus(
       await interaction.editReply({ embeds: [embed] });
       return;
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await interaction.editReply({ embeds: [buildErrorEmbed(message)] });
-  }
-}
-
-async function handleAddApikey(
-  interaction: ChatInputCommandInteraction,
-  accountManager: AccountManager,
-): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const provider = interaction.options.getString("provider", true) as SupportedProviderId;
-    const key = interaction.options.getString("key", true);
-
-    const result = await accountManager.addApiKeyCredential(provider, key);
-
-    const name = interaction.options.getString("name")?.trim();
-    if (name) {
-      await accountManager.setFriendlyName(provider, result.credentialId, name);
-    }
-
-    await interaction.editReply({
-      embeds: [
-        buildSuccessEmbed(
-          `Added credential \`${result.credentialId}\` for **${provider}**.\n` +
-            `${result.isBackupCredential ? "Added as backup." : "Added as primary."}\n` +
-            `Total credentials: ${result.credentialIds.length}`,
-        ),
-      ],
-    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await interaction.editReply({ embeds: [buildErrorEmbed(message)] });
