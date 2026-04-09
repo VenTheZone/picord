@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildAccessRequestLines,
   buildGroupedSessionLines,
-  buildLoginProviderLines,
   buildOAuthLoginEmbed,
   extractDeviceCodeFromInstructions,
 } from "./interaction-handler.js";
@@ -47,27 +46,6 @@ describe("interaction-handler helpers", () => {
     expect(lines.some((line) => line.includes("4 msg"))).toBe(true);
   });
 
-  it("builds readable /login provider summary lines", () => {
-    const lines = buildLoginProviderLines([
-      { name: "ChatGPT Plus/Pro (Codex Subscription)", method: "oauth", hasStoredAuth: true, supportsDiscordFlow: true },
-      {
-        name: "GitHub Copilot",
-        method: "oauth",
-        hasStoredAuth: false,
-        supportsDiscordFlow: false,
-        discordFlowReason: "OAuth login for this provider is not wired into Discord yet. Use pi locally for now.",
-      },
-      { name: "OpenRouter", method: "api-key", hasStoredAuth: false, supportsDiscordFlow: true },
-    ]);
-
-    expect(lines).toEqual([
-      "Choose a provider to log in or update.",
-      "- ChatGPT Plus/Pro (Codex Subscription) (oauth, configured)",
-      "- GitHub Copilot (oauth, not configured, local-only: OAuth login for this provider is not wired into Discord yet. Use pi locally for now.)",
-      "- OpenRouter (api-key, not configured)",
-    ]);
-  });
-
   it("builds a clearer access request prompt", () => {
     const lines = buildAccessRequestLines({
       id: "acc-1",
@@ -94,9 +72,9 @@ describe("interaction-handler helpers", () => {
     }).toJSON();
 
     expect(embed.title).toBe("ChatGPT Plus/Pro (Codex Subscription) Login");
-    expect(embed.description).toContain("device code was detected");
+    expect(embed.description).toContain("device code login");
     expect(embed.fields?.some((field) => field.name === "Device code" && field.value.includes("ABCD-EFGH"))).toBe(true);
-    expect(embed.fields?.some((field) => field.name === "Provider instructions" && field.value.includes("enter code: ABCD-EFGH"))).toBe(true);
+    expect(embed.fields?.some((field) => field.name === "Instructions" && field.value.includes("enter code: ABCD-EFGH"))).toBe(true);
   });
 
   it("builds an OAuth login embed that explains the localhost callback fallback when no device code exists", () => {
@@ -106,12 +84,10 @@ describe("interaction-handler helpers", () => {
       instructions: "Open the page and continue in browser.",
     }).toJSON();
 
-    expect(embed.description).toContain("local browser");
-    expect(embed.description).toContain("not on the VPS");
-    expect(embed.fields?.some((field) => field.name === "Device code" && field.value.includes("No device code exists"))).toBe(true);
-    expect(embed.fields?.some((field) => field.name === "Expected redirect" && field.value.includes("not on the VPS"))).toBe(true);
-    expect(embed.fields?.some((field) => field.name === "Next step" && field.value.includes("on your own computer"))).toBe(true);
-    expect(embed.fields?.some((field) => field.name === "Next step" && field.value.includes("pasting just that code also works"))).toBe(true);
+    expect(embed.description).toContain("browser callback");
+    expect(embed.description).toContain("Complete login");
+    expect(embed.fields?.some((field) => field.name === "Device code")).toBeFalsy();
+    expect(embed.fields?.some((field) => field.name === "Instructions" && field.value.includes("Open the page and continue in browser."))).toBe(true);
   });
 
 });

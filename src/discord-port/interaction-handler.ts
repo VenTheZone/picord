@@ -31,7 +31,6 @@ import { isGitWorkspace, reviewGitDiff, shareGitDiff } from "../critique.js";
 import { buildPromptFromInteraction, replyToInteraction } from "./message-helpers.js";
 import { handleMultiAuthCommand } from "./multi-auth-commands.js";
 import type { AccountManager } from "./multi-auth-integration.js";
-import { getOAuthProviders } from "../multi-auth/oauth-compat.js";
 import type { DiscordPortRuntime } from "./runtime.js";
 import type { LoginProviderOption } from "./types.js";
 import type { SupportedProviderId } from "../multi-auth/index-export.js";
@@ -87,48 +86,33 @@ export function buildOAuthLoginEmbed({
   instructions?: string;
 }): EmbedBuilder {
   const deviceCode = extractDeviceCodeFromInstructions(instructions);
+  const isDeviceCodeFlow = !!deviceCode;
+  
   const embed = new EmbedBuilder()
     .setTitle(`${providerName} Login`)
-    .setColor(deviceCode ? 0x5865f2 : 0xf59e0b)
-    .setDescription(deviceCode
-      ? `Provider: **${providerName}**\nA visible device code was detected, so Discord can show it without acting like a confused toaster.`
-      : `Provider: **${providerName}**\nThis provider uses a localhost browser callback in your **local browser**, not on the VPS. So yes, the browser gets dramatic and you paste the final redirected URL back into Discord.`)
-    .addFields(
-      {
-        name: "Verification page",
-        value: `[Open verification page](${verificationUrl})\n<${verificationUrl}>`,
-        inline: false,
-      },
-      {
-        name: "Device code",
-        value: deviceCode ? `\`${deviceCode}\`` : "No device code exists for this login attempt.",
-        inline: true,
-      },
-      {
-        name: "Next step",
-        value: deviceCode
-          ? "Finish the browser step, then click **Complete login** and paste the device code or redirected callback URL."
-          : "Finish the browser step on your own computer. When your local browser lands on `http://localhost:1455/auth/callback?...`, copy the full URL from the address bar and paste it into **Complete login**. If you can clearly see the `code=` value, pasting just that code also works.",
-        inline: false,
-      },
-    )
-    .setTimestamp();
+    .setColor(isDeviceCodeFlow ? 0x5865f2 : 0xf59e0b)
+    .setDescription(isDeviceCodeFlow
+      ? `**${providerName}** uses device code login.\n\nEnter the code shown below at the verification page, then click **I've completed the step** when done.`
+      : `**${providerName}** uses browser callback login.\n\nOpen the verification page, complete the browser steps, then click **Complete login** and paste the redirected URL.`)
+    .addFields({
+      name: "Verification page",
+      value: `[Open verification page](${verificationUrl})`,
+      inline: false,
+    });
 
-  if (!deviceCode) {
+  if (isDeviceCodeFlow) {
     embed.addFields({
-      name: "Expected redirect",
-      value: "`http://localhost:1455/auth/callback?code=...&state=...`\nThis redirect appears in your local browser, not on the VPS. If the page fails to load, that is annoying but expected. Copy the full URL anyway.",
+      name: "Device code",
+      value: `\`${deviceCode}\``,
       inline: false,
     });
   }
 
-  if (instructions?.trim()) {
-    embed.addFields({
-      name: "Provider instructions",
-      value: truncateEmbedFieldValue(instructions.trim()),
-      inline: false,
-    });
-  }
+  embed.addFields({
+    name: "Instructions",
+    value: instructions || "Follow the steps on the verification page.",
+    inline: false,
+  });
 
   return embed;
 }
@@ -365,91 +349,16 @@ export function buildGroupedSessionLines(sessions: Array<{
   return lines;
 }
 
-export function buildLoginProviderLines(providers: Array<{
-  name: string;
-  method: "api-key" | "oauth";
-  hasStoredAuth: boolean;
-  supportsDiscordFlow?: boolean;
-  discordFlowReason?: string;
-  credentialCount?: number;
-}>): string[] {
-  return [
-    "Choose a provider to log in or update.",
-    ...providers.slice(0, 25).map((provider) => {
-      const status = `${provider.method}${provider.hasStoredAuth ? ", configured" : ", not configured"}`;
-      const suffix = provider.supportsDiscordFlow === false
-        ? `, local-only: ${provider.discordFlowReason ?? "not available in Discord yet"}`
-        : "";
-      const countStr = provider.credentialCount ? ` [${provider.credentialCount} credential${provider.credentialCount === 1 ? "" : "s"}]` : "";
-      return `- ${provider.name}${countStr} (${status}${suffix})`;
-    }),
-  ];
-}
-
 async function handleLoginCommand(
   interaction: ChatInputCommandInteraction,
   runtime: DiscordPortRuntime,
-  multiAuthAccountManager: AccountManager | undefined,
 ): Promise<void> {
-  requireGuild(interaction);
-  const baseProviders = runtime.adapter.listLoginProviders();
-  const providerMap = new Map(baseProviders.map((p) => [p.id, p]));
-
-  if (multiAuthAccountManager) {
-    try {
-      const maProviders = await multiAuthAccountManager.getSupportedProviders();
-      const registry = multiAuthAccountManager.getProviderRegistry();
-      const allOAuthProviders = getOAuthProviders();
-      const oauthById = new Map(allOAuthProviders.map((p) => [p.id.trim(), p]));
-
-      for (const providerId of maProviders) {
-        if (providerMap.has(providerId)) continue;
-
-        const capabilities = registry.getProviderCapabilities(providerId);
-        let method: "api-key" | "oauth" = capabilities.supportsOAuth ? "oauth" : "api-key";
-        let name = providerId;
-        let supportsDiscordFlow: boolean | undefined;
-
-        if (method === "oauth") {
-          const oauthInfo = oauthById.get(providerId);
-          if (oauthInfo) {
-            name = oauthInfo.name.trim() || providerId;
-            // multi-auth OAuth providers support Discord flow (device code)
-            supportsDiscordFlow = true;
-          } else {
-            // OAuth provider not in pi's OAuth registry; fallback to api-key
-            method = "api-key";
-          }
-        }
-
-        let hasStoredAuth = false;
-        let credentialCount: number | undefined;
-        try {
-          const status = await multiAuthAccountManager.getProviderStatus(providerId);
-          hasStoredAuth = status.credentials.length > 0;
-          credentialCount = status.credentials.length;
-        } catch {
-          // ignore
-        }
-
-        providerMap.set(providerId, {
-          id: providerId,
-          name,
-          method,
-          hasStoredAuth,
-          credentialCount,
-          supportsDiscordFlow,
-        } as LoginProviderOption);
-      }
-    } catch {
-      // ignore errors, use baseProviders only
-    }
-  }
-
-  const providers = Array.from(providerMap.values());
-  if (providers.length === 0) {
+  const providers = runtime.adapter.listLoginProviders();
+  const oauthProviders = providers.filter((p) => p.method === "oauth");
+  
+  if (oauthProviders.length === 0) {
     await interaction.reply({
-      content: "No login providers are available.",
+      content: "No OAuth providers available. Use `/login provider: <name> key: <key>` to set an API key directly.",
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -457,23 +366,23 @@ async function handleLoginCommand(
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId(LOGIN_PROVIDER_SELECT)
-    .setPlaceholder("Choose a provider to log in or replace its API key")
+    .setPlaceholder("Choose an OAuth provider to log in")
     .setMinValues(1)
     .setMaxValues(1)
-    .addOptions(...providers.slice(0, 25).map((provider) => {
-      const countLabel = provider.credentialCount ? ` (${provider.credentialCount})` : "";
-      const label = (provider.name + countLabel).slice(0, 100);
-      const description = `${provider.method === "oauth" ? (provider.supportsDiscordFlow === false ? "OAuth (local only for now)" : "OAuth / subscription login") : "Set or replace API key"}${provider.hasStoredAuth ? " • already configured" : " • not configured"}`.slice(0, 100);
-      return { label, value: provider.id, description };
-    }));
+    .addOptions(...oauthProviders.slice(0, 25).map((provider) => ({
+      label: provider.name.slice(0, 100),
+      value: provider.id,
+      description: provider.hasStoredAuth
+        ? "Re-authenticate or update subscription"
+        : "Start OAuth login",
+    })));
 
   await interaction.reply({
-    content: [
-      ...buildLoginProviderLines(providers),
-      multiAuthAccountManager ? "\n💡 New credentials will be added to multi-auth for automatic rotation." : "",
-    ].filter(Boolean).join("\n"),
+    content: "**OAuth Login** - Select a provider to start authentication:\n\nFor API keys, use `/login provider: <name> key: <key>`",
     flags: MessageFlags.Ephemeral,
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+    ],
   });
 }
 
@@ -598,6 +507,27 @@ export function registerDiscordPortInteractionHandler({
           } catch {
             await interaction.respond([]);
           }
+          return;
+        }
+
+        if (interaction.commandName === "login" && focused.name === "provider") {
+          const query = String(focused.value ?? "").toLowerCase();
+          const allProviders = runtime.adapter.listLoginProviders();
+          
+          const oauthProviders = allProviders
+            .filter((p) => p.method === "oauth")
+            .filter((p) => query === "" || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query));
+          
+          const apiKeyProviders = allProviders
+            .filter((p) => p.method === "api-key")
+            .filter((p) => query === "" || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query));
+          
+          const choices = [
+            ...oauthProviders.slice(0, 10).map((p) => ({ name: `${p.name} (OAuth)`, value: p.id })),
+            ...apiKeyProviders.slice(0, 10).map((p) => ({ name: `${p.name} (API key)`, value: p.id })),
+          ].slice(0, 25);
+          
+          await interaction.respond(choices);
           return;
         }
 
@@ -1195,7 +1125,45 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "login") {
-        return await handleLoginCommand(interaction, runtime, multiAuthAccountManager);
+        const providerOpt = interaction.options.getString("provider")?.trim();
+        const keyOpt = interaction.options.getString("key")?.trim();
+
+        if (providerOpt && keyOpt) {
+          const providers = runtime.adapter.listLoginProviders();
+          const provider = providers.find((p) => p.id === providerOpt || p.name.toLowerCase() === providerOpt.toLowerCase());
+          if (!provider) {
+            await interaction.reply({
+              content: `Unknown provider: ${providerOpt}. Use /login without options to see available providers.`,
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          if (provider.id === "openai-codex" || providerOpt.toLowerCase().includes("codex")) {
+            await interaction.reply({
+              content: "**OpenAI Codex** uses OAuth login, not API keys. Use `/login` without options to start OAuth flow.",
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          if (provider.method === "api-key") {
+            runtime.adapter.setProviderApiKey(provider.id, keyOpt);
+            await interaction.reply({
+              content: `✅ Saved API key for **${provider.name}**. Your key is stored in auth.json and excluded from git.`,
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          await interaction.reply({
+            content: `**${provider.name}** uses OAuth, not direct API keys. Use /login without options to start OAuth flow.`,
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+
+        return await handleLoginCommand(interaction, runtime);
       }
 
       if (interaction.commandName === "project-create") {

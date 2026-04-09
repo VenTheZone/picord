@@ -128,6 +128,19 @@ export function buildLoginCommand(): RESTPostAPIChatInputApplicationCommandsJSON
   return new SlashCommandBuilder()
     .setName("login")
     .setDescription("Add or update API keys and OAuth credentials for providers")
+    .addStringOption((option) =>
+      option
+        .setName("provider")
+        .setDescription("Provider to configure")
+        .setRequired(false)
+        .setAutocomplete(true),
+    )
+    .addStringOption((option) =>
+      option
+        .setName("key")
+        .setDescription("API key to save (auto-saved)")
+        .setRequired(false),
+    )
     .toJSON();
 }
 
