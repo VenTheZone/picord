@@ -32,7 +32,7 @@ import { buildPromptFromInteraction, replyToInteraction } from "./message-helper
 import { handleMultiAuthCommand } from "./multi-auth-commands.js";
 import type { AccountManager } from "./multi-auth-integration.js";
 import type { DiscordPortRuntime } from "./runtime.js";
-import type { LoginProviderOption } from "./types.js";
+
 import type { SupportedProviderId } from "../multi-auth/index-export.js";
 
 const SCOPE_MODELS_APPLY_PREFIX = "scope-models:apply:";
