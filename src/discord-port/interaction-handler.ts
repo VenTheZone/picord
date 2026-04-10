@@ -21,14 +21,20 @@ import path from "node:path";
 import { canAccessDm, canAccessGuild } from "../auth.js";
 import { isEncryptionAvailable } from "../crypto/encryption.js";
 
-import { LiveDiscordRunRenderer, createInteractionLiveMessageTarget } from "../live-discord-renderer.js";
+import {
+  LiveDiscordRunRenderer,
+  createInteractionLiveMessageTarget,
+} from "../live-discord-renderer.js";
 import {
   buildEffectiveAccessConfig,
   extractMemberRoleIds,
   getWorkspaceChannelIdFromInteraction,
 } from "./access-control.js";
 import { isGitWorkspace, reviewGitDiff, shareGitDiff } from "../critique.js";
-import { buildPromptFromInteraction, replyToInteraction } from "./message-helpers.js";
+import {
+  buildPromptFromInteraction,
+  replyToInteraction,
+} from "./message-helpers.js";
 import { handleMultiAuthCommand } from "./multi-auth-commands.js";
 import type { AccountManager } from "./multi-auth-integration.js";
 import type { DiscordPortRuntime } from "./runtime.js";
@@ -50,14 +56,18 @@ const OUTSIDE_WORKSPACE_PROJECT_SELECT = "outside-workspace:project-select";
 const OUTSIDE_WORKSPACE_BUTTON_PREFIX = "outside-workspace:toggle:";
 
 function truncateEmbedFieldValue(value: string, maxLength = 1024): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+  return value.length <= maxLength
+    ? value
+    : `${value.slice(0, maxLength - 1)}…`;
 }
 
 function truncateToLimit(str: string, limit: number): string {
   return str.length <= limit ? str : `${str.slice(0, limit - 1)}…`;
 }
 
-export function extractDeviceCodeFromInstructions(instructions?: string): string | undefined {
+export function extractDeviceCodeFromInstructions(
+  instructions?: string,
+): string | undefined {
   if (!instructions) return undefined;
 
   const patterns = [
@@ -87,13 +97,15 @@ export function buildOAuthLoginEmbed({
 }): EmbedBuilder {
   const deviceCode = extractDeviceCodeFromInstructions(instructions);
   const isDeviceCodeFlow = !!deviceCode;
-  
+
   const embed = new EmbedBuilder()
     .setTitle(`${providerName} Login`)
     .setColor(isDeviceCodeFlow ? 0x5865f2 : 0xf59e0b)
-    .setDescription(isDeviceCodeFlow
-      ? `**${providerName}** uses device code login.\n\nEnter the code shown below at the verification page, then click **I've completed the step** when done.`
-      : `**${providerName}** uses browser callback login.\n\nOpen the verification page, complete the browser steps, then click **Complete login** and paste the redirected URL.`)
+    .setDescription(
+      isDeviceCodeFlow
+        ? `**${providerName}** uses device code login.\n\nEnter the code shown below at the verification page, then click **I've completed the step** when done.`
+        : `**${providerName}** uses browser callback login.\n\nOpen the verification page, complete the browser steps, then click **Complete login** and paste the redirected URL.`,
+    )
     .addFields({
       name: "Verification page",
       value: `[Open verification page](${verificationUrl})`,
@@ -117,10 +129,11 @@ export function buildOAuthLoginEmbed({
   return embed;
 }
 
-
 // --- Usage command helpers ---
 
-async function _getUsageOverview(accountManager: AccountManager): Promise<Record<string, string>> {
+async function _getUsageOverview(
+  accountManager: AccountManager,
+): Promise<Record<string, string>> {
   const providers = await accountManager.getSupportedProviders();
   const usageMap: Record<string, string> = {};
 
@@ -134,32 +147,48 @@ async function _getUsageOverview(accountManager: AccountManager): Promise<Record
         const lines: string[] = [];
 
         if (snapshot.primary) {
-          lines.push(`• Primary: ${snapshot.primary.usedPercent.toFixed(1)}% used`);
+          lines.push(
+            `• Primary: ${snapshot.primary.usedPercent.toFixed(1)}% used`,
+          );
           if (snapshot.primary.resetsAt) {
-            lines.push(`  Resets: ${new Date(snapshot.primary.resetsAt * 1000).toLocaleString()}`);
+            lines.push(
+              `  Resets: ${new Date(snapshot.primary.resetsAt * 1000).toLocaleString()}`,
+            );
           }
         }
         if (snapshot.secondary) {
-          lines.push(`• Secondary: ${snapshot.secondary.usedPercent.toFixed(1)}% used`);
+          lines.push(
+            `• Secondary: ${snapshot.secondary.usedPercent.toFixed(1)}% used`,
+          );
         }
         if (snapshot.copilotQuota) {
           if (snapshot.copilotQuota.chat) {
-            const chatRemain = snapshot.copilotQuota.chat.unlimited ? "∞" : (snapshot.copilotQuota.chat.remaining ?? "N/A");
-            lines.push(`• Copilot Chat: ${chatRemain} remaining${snapshot.copilotQuota.chat.unlimited ? " (unlimited)" : ""}`);
+            const chatRemain = snapshot.copilotQuota.chat.unlimited
+              ? "∞"
+              : (snapshot.copilotQuota.chat.remaining ?? "N/A");
+            lines.push(
+              `• Copilot Chat: ${chatRemain} remaining${snapshot.copilotQuota.chat.unlimited ? " (unlimited)" : ""}`,
+            );
           }
           if (snapshot.copilotQuota.completions) {
-            const compRemain = snapshot.copilotQuota.completions.unlimited ? "∞" : (snapshot.copilotQuota.completions.remaining ?? "N/A");
+            const compRemain = snapshot.copilotQuota.completions.unlimited
+              ? "∞"
+              : (snapshot.copilotQuota.completions.remaining ?? "N/A");
             lines.push(`• Copilot Completions: ${compRemain} remaining`);
           }
         }
 
         lines.push(`• Requests: ${cred.usageCount}`);
-        if (cred.quotaErrorCount > 0) lines.push(`• Quota errors: ${cred.quotaErrorCount}`);
-        if (cred.transientErrorCount) lines.push(`• Transient errors: ${cred.transientErrorCount}`);
-        if (cred.expiresAt) lines.push(`• Expires: ${new Date(cred.expiresAt).toLocaleString()}`);
+        if (cred.quotaErrorCount > 0)
+          lines.push(`• Quota errors: ${cred.quotaErrorCount}`);
+        if (cred.transientErrorCount)
+          lines.push(`• Transient errors: ${cred.transientErrorCount}`);
+        if (cred.expiresAt)
+          lines.push(`• Expires: ${new Date(cred.expiresAt).toLocaleString()}`);
 
         if (lines.length > 0) {
-          usageMap[`${provider} / ${cred.friendlyName ?? cred.credentialId}`] = lines.join("\n");
+          usageMap[`${provider} / ${cred.friendlyName ?? cred.credentialId}`] =
+            lines.join("\n");
         }
       }
     } catch {
@@ -177,13 +206,19 @@ function _buildUsageEmbed(usageMap: Record<string, string>): EmbedBuilder {
     .setTimestamp();
 
   for (const [key, value] of Object.entries(usageMap)) {
-    embed.addFields({ name: key, value: truncateEmbedFieldValue(value), inline: false });
+    embed.addFields({
+      name: key,
+      value: truncateEmbedFieldValue(value),
+      inline: false,
+    });
   }
 
   return embed;
 }
 
-function requireGuild(interaction: ChatInputCommandInteraction): asserts interaction is ChatInputCommandInteraction & { guildId: string } {
+function requireGuild(
+  interaction: ChatInputCommandInteraction,
+): asserts interaction is ChatInputCommandInteraction & { guildId: string } {
   if (!interaction.guildId) {
     throw new Error("This command can only be used in a guild.");
   }
@@ -191,8 +226,14 @@ function requireGuild(interaction: ChatInputCommandInteraction): asserts interac
 
 function requireThread(interaction: ChatInputCommandInteraction) {
   const channel = interaction.channel;
-  if (!channel || (channel.type !== ChannelType.PublicThread && channel.type !== ChannelType.PrivateThread)) {
-    throw new Error("Use this command inside a Discord thread. Project channel = workspace, thread = pi session.");
+  if (
+    !channel ||
+    (channel.type !== ChannelType.PublicThread &&
+      channel.type !== ChannelType.PrivateThread)
+  ) {
+    throw new Error(
+      "Use this command inside a Discord thread. Project channel = workspace, thread = pi session.",
+    );
   }
   return channel;
 }
@@ -204,25 +245,39 @@ function requireSessionThreadIfGuild(interaction: ChatInputCommandInteraction) {
   return requireThread(interaction);
 }
 
-function requireOwner(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): void {
+function requireOwner(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): void {
   if (!runtime.adapter.isOwner(interaction.user.id)) {
     throw new Error("Only the configured owner can use this command.");
   }
 }
 
-function requireOwnerOrAdmin(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): void {
+function requireOwnerOrAdmin(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): void {
   if (runtime.adapter.isOwner(interaction.user.id)) {
     return;
   }
 
-  if (interaction.guildId && interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (
+    interaction.guildId &&
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
+  ) {
     return;
   }
 
-  throw new Error("Only the configured owner or a Discord administrator can use this command.");
+  throw new Error(
+    "Only the configured owner or a Discord administrator can use this command.",
+  );
 }
 
-function isHostControlChannel(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): boolean {
+function isHostControlChannel(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): boolean {
   if (runtime.adapter.config.hostChannelId) {
     return interaction.channelId === runtime.adapter.config.hostChannelId;
   }
@@ -237,9 +292,14 @@ function isHostControlChannel(interaction: ChatInputCommandInteraction, runtime:
     : false;
 }
 
-function requireHostChannel(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): void {
+function requireHostChannel(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): void {
   if (!isHostControlChannel(interaction, runtime)) {
-    throw new Error(`Use this command in #${runtime.adapter.config.hostChannelName}.`);
+    throw new Error(
+      `Use this command in #${runtime.adapter.config.hostChannelName}.`,
+    );
   }
 }
 
@@ -253,25 +313,38 @@ function isOwnerAdminCommand(commandName: string): boolean {
     "project-list",
     "project-list-available",
     "session",
-        "access-requests",
+    "access-requests",
     "outside-workspace-access",
   ].includes(commandName);
 }
 
-export function ownerAdminCommandRequiresHostChannel(commandName: string, addProjectMode?: string): boolean {
+export function ownerAdminCommandRequiresHostChannel(
+  commandName: string,
+  addProjectMode?: string,
+): boolean {
   if (["outside-workspace-access", "reload", "restart"].includes(commandName)) {
     return false;
   }
 
-  return !(commandName === "add-project-path" && addProjectMode === "current-channel");
+  return !(
+    commandName === "add-project-path" && addProjectMode === "current-channel"
+  );
 }
 
 function findSkillCommand(commandName: string, runtime: DiscordPortRuntime) {
-  return runtime.adapter.listSkillSummaries().find((skill) => skill.name === commandName);
+  return runtime.adapter
+    .listSkillSummaries()
+    .find((skill) => skill.name === commandName);
 }
 
-function getThreadFromInteractionChannel(channel: Interaction["channel"]): ChatInputCommandInteraction["channel"] | undefined {
-  if (!channel || (channel.type !== ChannelType.PublicThread && channel.type !== ChannelType.PrivateThread)) {
+function getThreadFromInteractionChannel(
+  channel: Interaction["channel"],
+): ChatInputCommandInteraction["channel"] | undefined {
+  if (
+    !channel ||
+    (channel.type !== ChannelType.PublicThread &&
+      channel.type !== ChannelType.PrivateThread)
+  ) {
     return undefined;
   }
   return channel as ChatInputCommandInteraction["channel"];
@@ -279,7 +352,11 @@ function getThreadFromInteractionChannel(channel: Interaction["channel"]): ChatI
 
 function getWorkspaceKey(
   runtime: DiscordPortRuntime,
-  interaction: Interaction & { guildId?: string | null; channelId: string; channel?: Interaction["channel"] | null },
+  interaction: Interaction & {
+    guildId?: string | null;
+    channelId: string;
+    channel?: Interaction["channel"] | null;
+  },
 ) {
   return runtime.getWorkspaceKeyForLocation({
     guildId: interaction.guildId,
@@ -288,7 +365,12 @@ function getWorkspaceKey(
   });
 }
 
-function buildScopeModelsPrompt({ provider, totalMatches, truncated, query }: {
+function buildScopeModelsPrompt({
+  provider,
+  totalMatches,
+  truncated,
+  query,
+}: {
   provider: string;
   totalMatches: number;
   truncated: boolean;
@@ -297,9 +379,13 @@ function buildScopeModelsPrompt({ provider, totalMatches, truncated, query }: {
   return [
     `Select scoped models for ${provider}.`,
     query ? `Filter: ${query}` : undefined,
-    truncated ? `Showing the first 25 of ${totalMatches} matches. Narrow the query if needed.` : `Matches: ${totalMatches}`,
+    truncated
+      ? `Showing the first 25 of ${totalMatches} matches. Narrow the query if needed.`
+      : `Matches: ${totalMatches}`,
     "This replaces the workspace scope. Use /use-model after this to choose the active model.",
-  ].filter((line): line is string => Boolean(line)).join("\n");
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 }
 
 function formatSessionModified(date: Date): string {
@@ -312,13 +398,15 @@ function formatSessionModified(date: Date): string {
   }).format(date);
 }
 
-export function buildGroupedSessionLines(sessions: Array<{
-  projectName: string;
-  name?: string;
-  messageCount: number;
-  modified: Date;
-  cwd: string;
-}>): string[] {
+export function buildGroupedSessionLines(
+  sessions: Array<{
+    projectName: string;
+    name?: string;
+    messageCount: number;
+    modified: Date;
+    cwd: string;
+  }>,
+): string[] {
   const sorted = [...sessions].sort((left, right) => {
     const projectCompare = left.projectName.localeCompare(right.projectName);
     if (projectCompare !== 0) return projectCompare;
@@ -340,9 +428,13 @@ export function buildGroupedSessionLines(sessions: Array<{
     }
 
     projectSessionIndex += 1;
-    const title = session.name?.trim() || `${session.projectName} session ${projectSessionIndex}`;
+    const title =
+      session.name?.trim() ||
+      `${session.projectName} session ${projectSessionIndex}`;
     lines.push(`- ${title}`);
-    lines.push(`  ${session.messageCount} msg · ${formatSessionModified(session.modified)}`);
+    lines.push(
+      `  ${session.messageCount} msg · ${formatSessionModified(session.modified)}`,
+    );
     lines.push(`  ${session.cwd}`);
   }
 
@@ -355,10 +447,26 @@ async function handleLoginCommand(
 ): Promise<void> {
   const providers = runtime.adapter.listLoginProviders();
   const oauthProviders = providers.filter((p) => p.method === "oauth");
-  
+
   if (oauthProviders.length === 0) {
     await interaction.reply({
-      content: "No OAuth providers available. Use `/login provider: <name> key: <key>` to set an API key directly.",
+      content:
+        "No OAuth providers available. Use `/login provider: <name> key: <key>` to set an API key directly.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // OAuth flows (select menu, buttons, modals) all require the host control channel
+  // for security. Guide the user there early instead of failing mid-flow.
+  if (interaction.guildId && !isHostControlChannel(interaction, runtime)) {
+    const hostChannelId = runtime.adapter.config.hostChannelId;
+    const hostChannelName = runtime.adapter.config.hostChannelName;
+    const hint = hostChannelId
+      ? `Use this command in <#${hostChannelId}>.`
+      : `Use this command in #${hostChannelName}.`;
+    await interaction.reply({
+      content: `OAuth login requires the host control channel. ${hint}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -369,16 +477,19 @@ async function handleLoginCommand(
     .setPlaceholder("Choose an OAuth provider to log in")
     .setMinValues(1)
     .setMaxValues(1)
-    .addOptions(...oauthProviders.slice(0, 25).map((provider) => ({
-      label: provider.name.slice(0, 100),
-      value: provider.id,
-      description: provider.hasStoredAuth
-        ? "Re-authenticate or update subscription"
-        : "Start OAuth login",
-    })));
+    .addOptions(
+      ...oauthProviders.slice(0, 25).map((provider) => ({
+        label: provider.name.slice(0, 100),
+        value: provider.id,
+        description: provider.hasStoredAuth
+          ? "Re-authenticate or update subscription"
+          : "Start OAuth login",
+      })),
+    );
 
   await interaction.reply({
-    content: "**OAuth Login** - Select a provider to start authentication:\n\nFor API keys, use `/login provider: <name> key: <key>`",
+    content:
+      "**OAuth Login** - Select a provider to start authentication:\n\nFor API keys, use `/login provider: <name> key: <key>`",
     flags: MessageFlags.Ephemeral,
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
@@ -386,7 +497,10 @@ async function handleLoginCommand(
   });
 }
 
-export function buildAccessRequestLines(request: { id: string; summary: string }): string[] {
+export function buildAccessRequestLines(request: {
+  id: string;
+  summary: string;
+}): string[] {
   return [
     "Permission request",
     `Request ID: ${request.id}`,
@@ -395,7 +509,10 @@ export function buildAccessRequestLines(request: { id: string; summary: string }
   ];
 }
 
-function buildOutsideWorkspaceToggleLines(project: { channelId: string; name?: string }, enabled: boolean): string[] {
+function buildOutsideWorkspaceToggleLines(
+  project: { channelId: string; name?: string },
+  enabled: boolean,
+): string[] {
   return [
     `Project: <#${project.channelId}>${project.name ? ` (${project.name})` : ""}`,
     `Outside-workspace access: ${enabled ? "ENABLED" : "disabled"}`,
@@ -407,47 +524,74 @@ function buildOutsideWorkspaceToggleLines(project: { channelId: string; name?: s
 
 function resolveProjectDirectory(baseDir: string, inputPath: string): string {
   const trimmed = inputPath.trim();
-  const expanded = trimmed === "~"
-    ? process.env.HOME ?? trimmed
-    : trimmed.startsWith("~/")
-      ? path.join(process.env.HOME ?? "", trimmed.slice(2))
-      : trimmed;
+  const expanded =
+    trimmed === "~"
+      ? (process.env.HOME ?? trimmed)
+      : trimmed.startsWith("~/")
+        ? path.join(process.env.HOME ?? "", trimmed.slice(2))
+        : trimmed;
   return path.isAbsolute(expanded) ? expanded : path.resolve(baseDir, expanded);
 }
 
-function requireBindableGuildTextChannel(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): TextChannel {
+function requireBindableGuildTextChannel(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): TextChannel {
   const channel = interaction.channel;
   if (!channel || channel.type !== ChannelType.GuildText) {
     throw new Error("Current-channel mode only works in a guild text channel.");
   }
   if (isHostControlChannel(interaction, runtime)) {
-    throw new Error("The host control channel cannot be rebound as a project channel.");
+    throw new Error(
+      "The host control channel cannot be rebound as a project channel.",
+    );
   }
   return channel;
 }
 
-function getCritiqueWorkspaceRoot(interaction: ChatInputCommandInteraction, runtime: DiscordPortRuntime): string {
+function getCritiqueWorkspaceRoot(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+): string {
   if (!interaction.guildId) {
-    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+    return runtime.adapter.getWorkspaceInfo(
+      getWorkspaceKey(runtime, interaction),
+    ).root;
   }
 
   if (interaction.channel?.isThread()) {
-    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+    return runtime.adapter.getWorkspaceInfo(
+      getWorkspaceKey(runtime, interaction),
+    ).root;
   }
 
   if (runtime.adapter.isManagedProjectChannel(interaction.channelId)) {
-    return runtime.adapter.getWorkspaceInfo(getWorkspaceKey(runtime, interaction)).root;
+    return runtime.adapter.getWorkspaceInfo(
+      getWorkspaceKey(runtime, interaction),
+    ).root;
   }
 
-  throw new Error("Use this command in a managed project channel, a session thread, or a DM.");
+  throw new Error(
+    "Use this command in a managed project channel, a session thread, or a DM.",
+  );
 }
 
 async function checkInteractionAccess(
-  interaction: Interaction & { guildId?: string | null; guild?: Interaction["guild"] | null; user: { id: string }; channelId: string; member?: unknown },
+  interaction: Interaction & {
+    guildId?: string | null;
+    guild?: Interaction["guild"] | null;
+    user: { id: string };
+    channelId: string;
+    member?: unknown;
+  },
   runtime: DiscordPortRuntime,
 ) {
   const effectiveConfig = interaction.guild
-    ? await buildEffectiveAccessConfig(runtime.adapter.config, runtime.adapter, interaction.guild)
+    ? await buildEffectiveAccessConfig(
+        runtime.adapter.config,
+        runtime.adapter,
+        interaction.guild,
+      )
     : runtime.adapter.config;
 
   return !interaction.guildId
@@ -481,52 +625,88 @@ export function registerDiscordPortInteractionHandler({
         }
 
         const focused = interaction.options.getFocused(true);
-        if (interaction.commandName === "scope-models" && focused.name === "provider") {
-          await interaction.respond(runtime.findProviderChoices(String(focused.value ?? "")));
+        if (
+          interaction.commandName === "scope-models" &&
+          focused.name === "provider"
+        ) {
+          await interaction.respond(
+            runtime.findProviderChoices(String(focused.value ?? "")),
+          );
           return;
         }
 
-        if (interaction.commandName === "resume" || interaction.commandName === "use-model" || interaction.commandName === "model") {
+        if (
+          interaction.commandName === "resume" ||
+          interaction.commandName === "use-model" ||
+          interaction.commandName === "model"
+        ) {
           const workspaceKey = getWorkspaceKey(runtime, interaction);
           const query = String(focused.value ?? "");
-          const choices = interaction.commandName === "resume"
-            ? await runtime.findResumeChoices(workspaceKey, query)
-            : runtime.findModelChoices(workspaceKey, query);
+          const choices =
+            interaction.commandName === "resume"
+              ? await runtime.findResumeChoices(workspaceKey, query)
+              : runtime.findModelChoices(workspaceKey, query);
           await interaction.respond(choices);
           return;
         }
 
-        if (interaction.commandName === "multi-auth" && focused.name === "provider") {
+        if (
+          interaction.commandName === "multi-auth" &&
+          focused.name === "provider"
+        ) {
           if (!multiAuthAccountManager) {
             await interaction.respond([]);
             return;
           }
           try {
-            const providers = await multiAuthAccountManager.getSupportedProviders();
-            await interaction.respond(providers.map((p: SupportedProviderId) => ({ name: p, value: p })));
+            const providers =
+              await multiAuthAccountManager.getSupportedProviders();
+            await interaction.respond(
+              providers.map((p: SupportedProviderId) => ({
+                name: p,
+                value: p,
+              })),
+            );
           } catch {
             await interaction.respond([]);
           }
           return;
         }
 
-        if (interaction.commandName === "login" && focused.name === "provider") {
+        if (
+          interaction.commandName === "login" &&
+          focused.name === "provider"
+        ) {
           const query = String(focused.value ?? "").toLowerCase();
           const allProviders = runtime.adapter.listLoginProviders();
-          
+
           const oauthProviders = allProviders
             .filter((p) => p.method === "oauth")
-            .filter((p) => query === "" || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query));
-          
+            .filter(
+              (p) =>
+                query === "" ||
+                p.name.toLowerCase().includes(query) ||
+                p.id.toLowerCase().includes(query),
+            );
+
           const apiKeyProviders = allProviders
             .filter((p) => p.method === "api-key")
-            .filter((p) => query === "" || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query));
-          
+            .filter(
+              (p) =>
+                query === "" ||
+                p.name.toLowerCase().includes(query) ||
+                p.id.toLowerCase().includes(query),
+            );
+
           const choices = [
-            ...oauthProviders.slice(0, 10).map((p) => ({ name: `${p.name} (OAuth)`, value: p.id })),
-            ...apiKeyProviders.slice(0, 10).map((p) => ({ name: `${p.name} (API key)`, value: p.id })),
+            ...oauthProviders
+              .slice(0, 10)
+              .map((p) => ({ name: `${p.name} (OAuth)`, value: p.id })),
+            ...apiKeyProviders
+              .slice(0, 10)
+              .map((p) => ({ name: `${p.name} (API key)`, value: p.id })),
           ].slice(0, 25);
-          
+
           await interaction.respond(choices);
           return;
         }
@@ -538,15 +718,21 @@ export function registerDiscordPortInteractionHandler({
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === SESSION_SELECT) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === SESSION_SELECT
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
-        if (!interaction.guild) throw new Error("This action can only be used in a guild.");
+        if (!interaction.guild)
+          throw new Error("This action can only be used in a guild.");
 
         const sessionId = interaction.values[0]?.trim();
         if (!sessionId) throw new Error("No session was selected.");
-        const session = (await runtime.adapter.listAllSessions(100)).find((entry) => entry.id === sessionId);
+        const session = (await runtime.adapter.listAllSessions(100)).find(
+          (entry) => entry.id === sessionId,
+        );
         if (!session) throw new Error("Selected session no longer exists.");
 
         const created = await runtime.addExistingProjectChannel({
@@ -555,12 +741,16 @@ export function registerDiscordPortInteractionHandler({
           projectName: session.projectName,
           requestedBy: interaction.user,
         });
-        const channel = await interaction.guild.channels.fetch(created.textChannelId);
+        const channel = await interaction.guild.channels.fetch(
+          created.textChannelId,
+        );
         if (!channel || channel.type !== ChannelType.GuildText) {
           throw new Error("Project channel could not be loaded.");
         }
         const thread = await channel.threads.create({
-          name: (session.name?.trim() || `${session.projectName} session`).slice(0, 100),
+          name: (
+            session.name?.trim() || `${session.projectName} session`
+          ).slice(0, 100),
           autoArchiveDuration: 1440,
           reason: `picord resumed session ${session.id}`,
         });
@@ -579,15 +769,22 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === LOGIN_PROVIDER_SELECT) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === LOGIN_PROVIDER_SELECT
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
@@ -597,7 +794,9 @@ export function registerDiscordPortInteractionHandler({
           throw new Error("No provider was selected.");
         }
 
-        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        const provider = runtime.adapter
+          .listLoginProviders()
+          .find((entry) => entry.id === providerId);
         if (!provider) {
           throw new Error(`Unknown provider: ${providerId}`);
         }
@@ -607,7 +806,8 @@ export function registerDiscordPortInteractionHandler({
             await interaction.update({
               content: [
                 `**${provider.name}** cannot finish OAuth inside Discord yet.`,
-                provider.discordFlowReason ?? "Use pi locally for this provider's login flow.",
+                provider.discordFlowReason ??
+                  "Use pi locally for this provider's login flow.",
               ].join("\n"),
               embeds: [],
               components: [],
@@ -615,7 +815,10 @@ export function registerDiscordPortInteractionHandler({
             return;
           }
 
-          const started = await runtime.adapter.startProviderOAuthLogin(provider.id, interaction.user.id);
+          const started = await runtime.adapter.startProviderOAuthLogin(
+            provider.id,
+            interaction.user.id,
+          );
 
           const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
@@ -631,7 +834,9 @@ export function registerDiscordPortInteractionHandler({
               .setLabel("Cancel login")
               .setStyle(ButtonStyle.Danger),
           );
-          const components: Array<ActionRowBuilder<ButtonBuilder>> = [buttonRow];
+          const components: Array<ActionRowBuilder<ButtonBuilder>> = [
+            buttonRow,
+          ];
           if (started.pendingPrompt) {
             components.push(
               new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -645,11 +850,13 @@ export function registerDiscordPortInteractionHandler({
 
           await interaction.update({
             content: `${provider.name} login ready. Use the buttons below.${started.pendingPrompt ? "\nThis provider needs one extra answer before login can finish." : ""}${provider.discordFlowReason ? `\n${provider.discordFlowReason}` : ""}`,
-            embeds: [buildOAuthLoginEmbed({
-              providerName: provider.name,
-              verificationUrl: started.url,
-              instructions: started.instructions,
-            })],
+            embeds: [
+              buildOAuthLoginEmbed({
+                providerName: provider.name,
+                verificationUrl: started.url,
+                instructions: started.instructions,
+              }),
+            ],
             components,
           });
           return;
@@ -673,25 +880,37 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === OUTSIDE_WORKSPACE_PROJECT_SELECT) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === OUTSIDE_WORKSPACE_PROJECT_SELECT
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
 
         const channelId = interaction.values[0]?.trim();
         if (!channelId) throw new Error("No project was selected.");
-        const project = runtime.adapter.listManagedProjects().find((entry) => entry.channelId === channelId);
+        const project = runtime.adapter
+          .listManagedProjects()
+          .find((entry) => entry.channelId === channelId);
         if (!project) throw new Error("Selected project no longer exists.");
 
-        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, channelId);
+        const workspaceKey = runtime.buildWorkspaceKey(
+          interaction.guildId!,
+          channelId,
+        );
         const enabled = runtime.adapter.isOutsideWorkspaceAllowed(workspaceKey);
         const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
@@ -705,21 +924,30 @@ export function registerDiscordPortInteractionHandler({
         );
 
         await interaction.update({
-          content: buildOutsideWorkspaceToggleLines(project, enabled).join("\n"),
+          content: buildOutsideWorkspaceToggleLines(project, enabled).join(
+            "\n",
+          ),
           components: [buttons],
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === ADD_PROJECT_SELECT) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === ADD_PROJECT_SELECT
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
@@ -733,9 +961,13 @@ export function registerDiscordPortInteractionHandler({
           throw new Error("No project was selected.");
         }
 
-        const project = runtime.listAvailableProjects().find((entry) => entry.name === selectedName);
+        const project = runtime
+          .listAvailableProjects()
+          .find((entry) => entry.name === selectedName);
         if (!project) {
-          throw new Error(`Project not found under ${runtime.getProjectsDir()}: ${selectedName}`);
+          throw new Error(
+            `Project not found under ${runtime.getProjectsDir()}: ${selectedName}`,
+          );
         }
 
         const created = await runtime.addExistingProjectChannel({
@@ -757,24 +989,37 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith(SCOPE_MODELS_APPLY_PREFIX)) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId.startsWith(SCOPE_MODELS_APPLY_PREFIX)
+    ) {
       try {
         const access = await checkInteractionAccess(interaction, runtime);
         if (!access.allowed) {
-          await interaction.reply({ content: access.reason ?? "Not allowed.", flags: MessageFlags.Ephemeral });
+          await interaction.reply({
+            content: access.reason ?? "Not allowed.",
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
 
         const workspaceKey = getWorkspaceKey(runtime, interaction);
-        const scope = runtime.adapter.setWorkspaceModelScope(workspaceKey, interaction.values.join(" "));
+        const scope = runtime.adapter.setWorkspaceModelScope(
+          workspaceKey,
+          interaction.values.join(" "),
+        );
         await interaction.update({
           content: `Workspace model scope updated to ${scope.models.length} model${scope.models.length === 1 ? "" : "s"}. Use /use-model to pick the active model.`,
           components: [],
@@ -782,15 +1027,22 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith(ACCESS_BUTTON_PREFIX)) {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith(ACCESS_BUTTON_PREFIX)
+    ) {
       try {
         requireOwner(interaction as never, runtime);
 
@@ -799,23 +1051,35 @@ export function registerDiscordPortInteractionHandler({
           throw new Error("Invalid access request action.");
         }
 
-        const request = runtime.adapter.resolveAccessRequest(requestId, mode as "once" | "always" | "deny");
+        const request = runtime.adapter.resolveAccessRequest(
+          requestId,
+          mode as "once" | "always" | "deny",
+        );
         await interaction.update({
-          content: request ? `Resolved ${requestId}: ${mode}.` : `No pending access request with id ${requestId}.`,
+          content: request
+            ? `Resolved ${requestId}: ${mode}.`
+            : `No pending access request with id ${requestId}.`,
           components: [],
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith(OUTSIDE_WORKSPACE_BUTTON_PREFIX)) {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith(OUTSIDE_WORKSPACE_BUTTON_PREFIX)
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         const [, , mode, channelId] = interaction.customId.split(":");
@@ -823,48 +1087,82 @@ export function registerDiscordPortInteractionHandler({
           throw new Error("Invalid outside-workspace action.");
         }
 
-        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, channelId);
+        const workspaceKey = runtime.buildWorkspaceKey(
+          interaction.guildId!,
+          channelId,
+        );
         const allowed = mode === "allow";
         runtime.adapter.setOutsideWorkspaceAllowed(workspaceKey, allowed);
-        const project = runtime.adapter.listManagedProjects().find((entry) => entry.channelId === channelId) ?? { channelId };
+        const project = runtime.adapter
+          .listManagedProjects()
+          .find((entry) => entry.channelId === channelId) ?? { channelId };
 
         await interaction.update({
-          content: buildOutsideWorkspaceToggleLines(project, allowed).join("\n"),
-          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}allow:${channelId}`)
-              .setLabel("Enable")
-              .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-              .setCustomId(`${OUTSIDE_WORKSPACE_BUTTON_PREFIX}deny:${channelId}`)
-              .setLabel("Disable")
-              .setStyle(ButtonStyle.Secondary),
-          )],
+          content: buildOutsideWorkspaceToggleLines(project, allowed).join(
+            "\n",
+          ),
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId(
+                  `${OUTSIDE_WORKSPACE_BUTTON_PREFIX}allow:${channelId}`,
+                )
+                .setLabel("Enable")
+                .setStyle(ButtonStyle.Success),
+              new ButtonBuilder()
+                .setCustomId(
+                  `${OUTSIDE_WORKSPACE_BUTTON_PREFIX}deny:${channelId}`,
+                )
+                .setLabel("Disable")
+                .setStyle(ButtonStyle.Secondary),
+            ),
+          ],
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_PROMPT_PREFIX)) {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith(LOGIN_OAUTH_PROMPT_PREFIX)
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
-        const providerId = interaction.customId.slice(LOGIN_OAUTH_PROMPT_PREFIX.length);
-        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
-        const prompt = runtime.adapter.getPendingOAuthPrompt(providerId, interaction.user.id);
+        const providerId = interaction.customId.slice(
+          LOGIN_OAUTH_PROMPT_PREFIX.length,
+        );
+        const provider = runtime.adapter
+          .listLoginProviders()
+          .find((entry) => entry.id === providerId);
+        const prompt = runtime.adapter.getPendingOAuthPrompt(
+          providerId,
+          interaction.user.id,
+        );
         if (!prompt) {
-          throw new Error("This login is not currently waiting for a provider prompt.");
+          throw new Error(
+            "This login is not currently waiting for a provider prompt.",
+          );
         }
         const modal = new ModalBuilder()
           .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}:prompt`)
-          .setTitle(truncateToLimit(`Answer ${(provider?.name ?? providerId)} prompt`, 45))
+          .setTitle(
+            truncateToLimit(
+              `Answer ${provider?.name ?? providerId} prompt`,
+              45,
+            ),
+          )
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
@@ -881,29 +1179,47 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_COMPLETE_PREFIX)) {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith(LOGIN_OAUTH_COMPLETE_PREFIX)
+    ) {
       try {
         requireOwner(interaction as never, runtime);
         requireHostChannel(interaction as never, runtime);
-        const providerId = interaction.customId.slice(LOGIN_OAUTH_COMPLETE_PREFIX.length);
-        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        const providerId = interaction.customId.slice(
+          LOGIN_OAUTH_COMPLETE_PREFIX.length,
+        );
+        const provider = runtime.adapter
+          .listLoginProviders()
+          .find((entry) => entry.id === providerId);
         const modal = new ModalBuilder()
           .setCustomId(`${LOGIN_OAUTH_MODAL_PREFIX}${providerId}`)
-          .setTitle(truncateToLimit(`Complete ${(provider?.name ?? providerId)} login`, 45))
+          .setTitle(
+            truncateToLimit(
+              `Complete ${provider?.name ?? providerId} login`,
+              45,
+            ),
+          )
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId("code")
                 .setLabel("Paste the final local-browser redirect URL")
-                .setPlaceholder("http://localhost:1455/auth/callback?code=...&state=... or just the code")
+                .setPlaceholder(
+                  "http://localhost:1455/auth/callback?code=...&state=... or just the code",
+                )
                 .setStyle(TextInputStyle.Paragraph)
                 .setMinLength(1)
                 .setMaxLength(4000)
@@ -914,19 +1230,30 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith(LOGIN_OAUTH_CANCEL_PREFIX)) {
+    if (
+      interaction.isButton() &&
+      interaction.customId.startsWith(LOGIN_OAUTH_CANCEL_PREFIX)
+    ) {
       try {
         requireOwner(interaction as never, runtime);
-        const providerId = interaction.customId.slice(LOGIN_OAUTH_CANCEL_PREFIX.length);
-        const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+        const providerId = interaction.customId.slice(
+          LOGIN_OAUTH_CANCEL_PREFIX.length,
+        );
+        const provider = runtime.adapter
+          .listLoginProviders()
+          .find((entry) => entry.id === providerId);
         runtime.adapter.cancelProviderOAuthLogin(interaction.user.id);
         await interaction.update({
           content: `${provider?.name ?? providerId} login cancelled. Ready for a fresh attempt with /login.`,
@@ -936,9 +1263,13 @@ export function registerDiscordPortInteractionHandler({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
@@ -948,22 +1279,30 @@ export function registerDiscordPortInteractionHandler({
       try {
         const access = await checkInteractionAccess(interaction, runtime);
         if (!access.allowed) {
-          await interaction.reply({ content: access.reason ?? "Not allowed.", flags: MessageFlags.Ephemeral });
+          await interaction.reply({
+            content: access.reason ?? "Not allowed.",
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
 
         const workspaceKey = getWorkspaceKey(runtime, interaction);
         runtime.adapter.clearWorkspaceModelScope(workspaceKey);
         await interaction.update({
-          content: "Workspace model scope cleared. /use-model will show all configured models again.",
+          content:
+            "Workspace model scope cleared. /use-model will show all configured models again.",
           components: [],
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
@@ -975,23 +1314,36 @@ export function registerDiscordPortInteractionHandler({
         requireHostChannel(interaction as never, runtime);
 
         if (interaction.customId.startsWith(LOGIN_API_KEY_MODAL_PREFIX)) {
-          const providerId = interaction.customId.slice(LOGIN_API_KEY_MODAL_PREFIX.length);
+          const providerId = interaction.customId.slice(
+            LOGIN_API_KEY_MODAL_PREFIX.length,
+          );
           const apiKey = interaction.fields.getTextInputValue("apiKey");
           runtime.adapter.setProviderApiKey(providerId, apiKey);
           const messages = [`✅ Stored API key for **${providerId}**.`];
           if (!isEncryptionAvailable()) {
-            messages.push("⚠️ **Credentials stored in plaintext.** Set `PICORD_ENCRYPTION_KEY` env var to encrypt.");
+            messages.push(
+              "⚠️ **Credentials stored in plaintext.** Set `PICORD_ENCRYPTION_KEY` env var to encrypt.",
+            );
           }
           if (multiAuthAccountManager) {
             try {
-              await multiAuthAccountManager.addApiKeyCredential(providerId as SupportedProviderId, apiKey);
+              await multiAuthAccountManager.addApiKeyCredential(
+                providerId as SupportedProviderId,
+                apiKey,
+              );
               messages.push("🔄 Added to multi-auth rotation.");
-              const status = await multiAuthAccountManager.getProviderStatus(providerId as SupportedProviderId);
+              const status = await multiAuthAccountManager.getProviderStatus(
+                providerId as SupportedProviderId,
+              );
               if (status.credentials.length > 0) {
-                messages.push(`📊 **${status.credentials.length}** credential${status.credentials.length === 1 ? "" : "s"} now available for ${providerId}.`);
+                messages.push(
+                  `📊 **${status.credentials.length}** credential${status.credentials.length === 1 ? "" : "s"} now available for ${providerId}.`,
+                );
               }
             } catch (error) {
-              messages.push(`⚠️ Failed to sync to multi-auth: ${error instanceof Error ? error.message : String(error)}`);
+              messages.push(
+                `⚠️ Failed to sync to multi-auth: ${error instanceof Error ? error.message : String(error)}`,
+              );
             }
           }
           await interaction.reply({
@@ -1002,28 +1354,70 @@ export function registerDiscordPortInteractionHandler({
         }
 
         if (interaction.customId.startsWith(LOGIN_OAUTH_MODAL_PREFIX)) {
-          const rawProviderId = interaction.customId.slice(LOGIN_OAUTH_MODAL_PREFIX.length);
+          const rawProviderId = interaction.customId.slice(
+            LOGIN_OAUTH_MODAL_PREFIX.length,
+          );
           const [providerId, mode] = rawProviderId.split(":", 2);
-          const provider = runtime.adapter.listLoginProviders().find((entry) => entry.id === providerId);
+          const provider = runtime.adapter
+            .listLoginProviders()
+            .find((entry) => entry.id === providerId);
           await interaction.deferReply({ flags: MessageFlags.Ephemeral });
           if (mode === "prompt") {
-            runtime.adapter.submitProviderOAuthPrompt(providerId, interaction.user.id, interaction.fields.getTextInputValue("prompt"));
-            await interaction.editReply({ content: `${provider?.name ?? providerId} prompt answer submitted. Finish the browser/device step, then use Complete login.` });
+            runtime.adapter.submitProviderOAuthPrompt(
+              providerId,
+              interaction.user.id,
+              interaction.fields.getTextInputValue("prompt"),
+            );
+            await interaction.editReply({
+              content: `${provider?.name ?? providerId} prompt answer submitted. Finish the browser/device step, then use Complete login.`,
+            });
             return;
           }
           const code = interaction.fields.getTextInputValue("code");
-          await runtime.adapter.completeProviderOAuthLogin(providerId, interaction.user.id, code);
+          await runtime.adapter.completeProviderOAuthLogin(
+            providerId,
+            interaction.user.id,
+            code,
+          );
+          const messages = [
+            `${provider?.name ?? providerId} login completed successfully.`,
+          ];
+          if (multiAuthAccountManager) {
+            try {
+              // getProviderStatus triggers syncProviderState which re-reads auth.json
+              // and discovers the OAuth credential just written by the pi SDK
+              const status = await multiAuthAccountManager.getProviderStatus(
+                providerId as SupportedProviderId,
+              );
+              await multiAuthAccountManager.autoActivatePreferredCredentials({
+                avoidUsageApi: true,
+              });
+              if (status.credentials.length > 0) {
+                messages.push(
+                  `🔄 Synced to multi-auth rotation — **${status.credentials.length}** credential${status.credentials.length === 1 ? "" : "s"} now available.`,
+                );
+              }
+            } catch (error) {
+              messages.push(
+                `⚠️ Multi-auth sync failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
           await interaction.editReply({
-            content: `${provider?.name ?? providerId} login completed successfully.`,
+            content: messages.join("\n"),
           });
           return;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .followUp({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         } else {
-          await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+          await interaction
+            .reply({ content: message, flags: MessageFlags.Ephemeral })
+            .catch(() => undefined);
         }
       }
       return;
@@ -1043,17 +1437,26 @@ export function registerDiscordPortInteractionHandler({
           requireOwner(interaction, runtime);
         }
 
-        if (ownerAdminCommandRequiresHostChannel(interaction.commandName, interaction.options.getString("mode") ?? undefined)) {
+        if (
+          ownerAdminCommandRequiresHostChannel(
+            interaction.commandName,
+            interaction.options.getString("mode") ?? undefined,
+          )
+        ) {
           requireHostChannel(interaction, runtime);
         }
       }
 
-      const access = interaction.guildId && ownerAdminCommand
-        ? { allowed: true }
-        : await checkInteractionAccess(interaction, runtime);
+      const access =
+        interaction.guildId && ownerAdminCommand
+          ? { allowed: true }
+          : await checkInteractionAccess(interaction, runtime);
 
       if (!access.allowed) {
-        await interaction.reply({ content: access.reason ?? "Not allowed.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({
+          content: access.reason ?? "Not allowed.",
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
@@ -1062,7 +1465,9 @@ export function registerDiscordPortInteractionHandler({
           requireOwner(interaction, runtime);
         }
 
-        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        const thread = interaction.channel?.isThread()
+          ? interaction.channel
+          : undefined;
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -1074,17 +1479,27 @@ export function registerDiscordPortInteractionHandler({
           thread,
         });
 
-        if (interaction.guildId && !thread && !runtime.adapter.isManagedProjectChannel(interaction.channelId)) {
-          throw new Error("Use /reload in a managed project channel, a session thread, or a DM.");
+        if (
+          interaction.guildId &&
+          !thread &&
+          !runtime.adapter.isManagedProjectChannel(interaction.channelId)
+        ) {
+          throw new Error(
+            "Use /reload in a managed project channel, a session thread, or a DM.",
+          );
         }
 
-        const restarted = await runtime.adapter.restartSession(conversationKey, workspaceKey);
+        const restarted = await runtime.adapter.restartSession(
+          conversationKey,
+          workspaceKey,
+        );
         const visibleNotice = restarted
           ? "✅ Session restarted here. New config/tools will apply on the next message."
           : "✅ No bound session was active here, so the next message will already start fresh with the latest config/tools.";
 
         await interaction.reply({
-          content: "Session reload complete. I will post confirmation in this location too.",
+          content:
+            "Session reload complete. I will post confirmation in this location too.",
           flags: MessageFlags.Ephemeral,
         });
 
@@ -1095,11 +1510,14 @@ export function registerDiscordPortInteractionHandler({
               allowedMentions: { parse: [] },
             });
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            await interaction.followUp({
-              content: `Session reload succeeded, but I could not post the visible confirmation here: ${message}`,
-              flags: MessageFlags.Ephemeral,
-            }).catch(() => undefined);
+            const message =
+              error instanceof Error ? error.message : String(error);
+            await interaction
+              .followUp({
+                content: `Session reload succeeded, but I could not post the visible confirmation here: ${message}`,
+                flags: MessageFlags.Ephemeral,
+              })
+              .catch(() => undefined);
           }
         }
         return;
@@ -1108,7 +1526,8 @@ export function registerDiscordPortInteractionHandler({
       if (interaction.commandName === "restart") {
         requireGuild(interaction);
         await interaction.reply({
-          content: "Queued picord restart. I will notify this channel once Picord is back online.",
+          content:
+            "Queued picord restart. I will notify this channel once Picord is back online.",
           flags: MessageFlags.Ephemeral,
         });
         await runtime.adapter.restartRuntime({
@@ -1130,7 +1549,11 @@ export function registerDiscordPortInteractionHandler({
 
         if (providerOpt && keyOpt) {
           const providers = runtime.adapter.listLoginProviders();
-          const provider = providers.find((p) => p.id === providerOpt || p.name.toLowerCase() === providerOpt.toLowerCase());
+          const provider = providers.find(
+            (p) =>
+              p.id === providerOpt ||
+              p.name.toLowerCase() === providerOpt.toLowerCase(),
+          );
           if (!provider) {
             await interaction.reply({
               content: `Unknown provider: ${providerOpt}. Use /login without options to see available providers.`,
@@ -1139,9 +1562,13 @@ export function registerDiscordPortInteractionHandler({
             return;
           }
 
-          if (provider.id === "openai-codex" || providerOpt.toLowerCase().includes("codex")) {
+          if (
+            provider.id === "openai-codex" ||
+            providerOpt.toLowerCase().includes("codex")
+          ) {
             await interaction.reply({
-              content: "**OpenAI Codex** uses OAuth login, not API keys. Use `/login` without options to start OAuth flow.",
+              content:
+                "**OpenAI Codex** uses OAuth login, not API keys. Use `/login` without options to start OAuth flow.",
               flags: MessageFlags.Ephemeral,
             });
             return;
@@ -1149,8 +1576,32 @@ export function registerDiscordPortInteractionHandler({
 
           if (provider.method === "api-key") {
             runtime.adapter.setProviderApiKey(provider.id, keyOpt);
+            const messages = [
+              `✅ Saved API key for **${provider.name}**. Your key is stored in auth.json and excluded from git.`,
+            ];
+            if (multiAuthAccountManager) {
+              try {
+                await multiAuthAccountManager.addApiKeyCredential(
+                  provider.id as SupportedProviderId,
+                  keyOpt,
+                );
+                messages.push("🔄 Added to multi-auth rotation.");
+                const status = await multiAuthAccountManager.getProviderStatus(
+                  provider.id as SupportedProviderId,
+                );
+                if (status.credentials.length > 0) {
+                  messages.push(
+                    `📊 **${status.credentials.length}** credential${status.credentials.length === 1 ? "" : "s"} now available for ${provider.name}.`,
+                  );
+                }
+              } catch (error) {
+                messages.push(
+                  `⚠️ Failed to sync to multi-auth: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
             await interaction.reply({
-              content: `✅ Saved API key for **${provider.name}**. Your key is stored in auth.json and excluded from git.`,
+              content: messages.join("\n"),
               flags: MessageFlags.Ephemeral,
             });
             return;
@@ -1207,34 +1658,48 @@ export function registerDiscordPortInteractionHandler({
           .setPlaceholder("Select a project to create or reuse its channel")
           .setMinValues(1)
           .setMaxValues(1)
-          .addOptions(...visibleProjects.map((project) => ({
-            label: project.name.slice(0, 100),
-            value: project.name,
-            description: (project.managed
-              ? `Already mapped to channel ${project.channelId}`
-              : `Create a Picord channel for ${project.name}`).slice(0, 100),
-          })));
+          .addOptions(
+            ...visibleProjects.map((project) => ({
+              label: project.name.slice(0, 100),
+              value: project.name,
+              description: (project.managed
+                ? `Already mapped to channel ${project.channelId}`
+                : `Create a Picord channel for ${project.name}`
+              ).slice(0, 100),
+            })),
+          );
 
         await interaction.reply({
           content: [
             `Pick a project under ${runtime.getProjectsDir()}.`,
             "",
-            ...visibleProjects.map((project) => `- ${project.name}${project.managed ? ` (already mapped -> <#${project.channelId}>)` : ""}`),
+            ...visibleProjects.map(
+              (project) =>
+                `- ${project.name}${project.managed ? ` (already mapped -> <#${project.channelId}>)` : ""}`,
+            ),
             "",
             availableProjects.length > visibleProjects.length
               ? `Showing the first ${visibleProjects.length} of ${availableProjects.length} folders. Use /project-list-available to see the full list.`
               : "Selecting one will create or reuse a project channel under the Picord category.",
           ].join("\n"),
           flags: MessageFlags.Ephemeral,
-          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+          components: [
+            new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+          ],
         });
         return;
       }
 
       if (interaction.commandName === "add-project-path") {
         requireGuild(interaction);
-        const projectDirectory = resolveProjectDirectory(runtime.adapter.config.cwd, interaction.options.getString("path", true));
-        if (!fs.existsSync(projectDirectory) || !fs.statSync(projectDirectory).isDirectory()) {
+        const projectDirectory = resolveProjectDirectory(
+          runtime.adapter.config.cwd,
+          interaction.options.getString("path", true),
+        );
+        if (
+          !fs.existsSync(projectDirectory) ||
+          !fs.statSync(projectDirectory).isDirectory()
+        ) {
           await interaction.reply({
             content: `Directory does not exist: ${projectDirectory}`,
             flags: MessageFlags.Ephemeral,
@@ -1243,8 +1708,9 @@ export function registerDiscordPortInteractionHandler({
         }
 
         const mode = interaction.options.getString("mode", true);
-        const projectName = interaction.options.getString("name")?.trim() || undefined;
-        const gitWarning = await isGitWorkspace(projectDirectory)
+        const projectName =
+          interaction.options.getString("name")?.trim() || undefined;
+        const gitWarning = (await isGitWorkspace(projectDirectory))
           ? undefined
           : "Warning: this directory is not inside a Git repository.";
 
@@ -1259,7 +1725,9 @@ export function registerDiscordPortInteractionHandler({
             content: [
               `Bound <#${bound.textChannelId}> to ${projectDirectory}`,
               gitWarning,
-            ].filter(Boolean).join("\n"),
+            ]
+              .filter(Boolean)
+              .join("\n"),
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -1277,7 +1745,9 @@ export function registerDiscordPortInteractionHandler({
               ? `Created <#${created.textChannelId}> mapped to ${projectDirectory}`
               : `Reusing <#${created.textChannelId}> mapped to ${projectDirectory}`,
             gitWarning,
-          ].filter(Boolean).join("\n"),
+          ]
+            .filter(Boolean)
+            .join("\n"),
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1287,7 +1757,11 @@ export function registerDiscordPortInteractionHandler({
         const workspaceKey = getWorkspaceKey(runtime, interaction);
         const provider = interaction.options.getString("provider", true).trim();
         const query = interaction.options.getString("query")?.trim() ?? "";
-        const result = runtime.findScopeModelChoices(workspaceKey, provider, query);
+        const result = runtime.findScopeModelChoices(
+          workspaceKey,
+          provider,
+          query,
+        );
         if (!result.providerExists) {
           await interaction.reply({
             content: `No configured models found for provider ${provider}.`,
@@ -1330,16 +1804,22 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
-      if (interaction.commandName === "use-model" || interaction.commandName === "model") {
+      if (
+        interaction.commandName === "use-model" ||
+        interaction.commandName === "model"
+      ) {
         if (interaction.guildId && isHostControlChannel(interaction, runtime)) {
           await interaction.reply({
-            content: "Use /use-model in a project channel or session thread, not in the host control channel.",
+            content:
+              "Use /use-model in a project channel or session thread, not in the host control channel.",
             flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
-        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        const thread = interaction.channel?.isThread()
+          ? interaction.channel
+          : undefined;
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -1350,10 +1830,16 @@ export function registerDiscordPortInteractionHandler({
           channelId: interaction.channelId,
           thread,
         });
-        const modelReference = interaction.options.getString("model", true).trim();
+        const modelReference = interaction.options
+          .getString("model", true)
+          .trim();
 
         if (thread || !interaction.guildId) {
-          const model = await runtime.adapter.setConversationModel(conversationKey, workspaceKey, modelReference);
+          const model = await runtime.adapter.setConversationModel(
+            conversationKey,
+            workspaceKey,
+            modelReference,
+          );
           await interaction.reply({
             content: `Session model set to ${model.provider}/${model.id}`,
             flags: MessageFlags.Ephemeral,
@@ -1361,7 +1847,10 @@ export function registerDiscordPortInteractionHandler({
           return;
         }
 
-        const model = await runtime.adapter.setWorkspaceModel(workspaceKey, modelReference);
+        const model = await runtime.adapter.setWorkspaceModel(
+          workspaceKey,
+          modelReference,
+        );
         await interaction.reply({
           content: `Project default model set to ${model.provider}/${model.id}`,
           flags: MessageFlags.Ephemeral,
@@ -1372,13 +1861,16 @@ export function registerDiscordPortInteractionHandler({
       if (interaction.commandName === "think") {
         if (interaction.guildId && isHostControlChannel(interaction, runtime)) {
           await interaction.reply({
-            content: "Use /think in a project channel or session thread, not in the host control channel.",
+            content:
+              "Use /think in a project channel or session thread, not in the host control channel.",
             flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
-        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        const thread = interaction.channel?.isThread()
+          ? interaction.channel
+          : undefined;
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -1389,10 +1881,17 @@ export function registerDiscordPortInteractionHandler({
           channelId: interaction.channelId,
           thread,
         });
-        const thinkingLevel = interaction.options.getString("level", true) as import("../types.js").ThinkingLevel;
+        const thinkingLevel = interaction.options.getString(
+          "level",
+          true,
+        ) as import("../types.js").ThinkingLevel;
 
         if (thread || !interaction.guildId) {
-          runtime.adapter.setConversationThinkingLevel(conversationKey, workspaceKey, thinkingLevel);
+          runtime.adapter.setConversationThinkingLevel(
+            conversationKey,
+            workspaceKey,
+            thinkingLevel,
+          );
           await interaction.reply({
             content: `Session thinking level set to ${thinkingLevel}`,
             flags: MessageFlags.Ephemeral,
@@ -1415,7 +1914,8 @@ export function registerDiscordPortInteractionHandler({
           channelId: interaction.channelId,
           thread,
         });
-        const currentVisible = runtime.adapter.getThinkingVisibility(conversationKey);
+        const currentVisible =
+          runtime.adapter.getThinkingVisibility(conversationKey);
         const newVisible = !currentVisible;
         runtime.adapter.setThinkingVisibility(conversationKey, newVisible);
         await interaction.reply({
@@ -1445,13 +1945,20 @@ export function registerDiscordPortInteractionHandler({
         });
         const promptText = interaction.options.getString("prompt", true).trim();
         if (!promptText) {
-          await interaction.reply({ content: "Prompt cannot be empty.", flags: MessageFlags.Ephemeral });
+          await interaction.reply({
+            content: "Prompt cannot be empty.",
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
-        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction), { thinkingVisible });
+        const thinkingVisible =
+          runtime.adapter.getThinkingVisibility(conversationKey);
+        const renderer = new LiveDiscordRunRenderer(
+          createInteractionLiveMessageTarget(interaction),
+          { thinkingVisible },
+        );
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
         try {
           const response = await runtime.adapter.respond({
@@ -1501,31 +2008,49 @@ export function registerDiscordPortInteractionHandler({
           .setPlaceholder("Choose a session to restore")
           .setMinValues(1)
           .setMaxValues(1)
-          .addOptions(...sessions.map((session, index) => {
-            const title = session.name?.trim() || `${session.projectName} session ${index + 1}`;
-            return {
-              label: `${session.projectName} · ${title.slice(0, 70)}`.slice(0, 100),
-              value: session.id,
-              description: `${session.messageCount} msg · ${formatSessionModified(session.modified)}`.slice(0, 100),
-            };
-          }));
+          .addOptions(
+            ...sessions.map((session, index) => {
+              const title =
+                session.name?.trim() ||
+                `${session.projectName} session ${index + 1}`;
+              return {
+                label: `${session.projectName} · ${title.slice(0, 70)}`.slice(
+                  0,
+                  100,
+                ),
+                value: session.id,
+                description:
+                  `${session.messageCount} msg · ${formatSessionModified(session.modified)}`.slice(
+                    0,
+                    100,
+                  ),
+              };
+            }),
+          );
 
         await interaction.reply({
           content: buildGroupedSessionLines(sessions).join("\n"),
           flags: MessageFlags.Ephemeral,
-          components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+          components: [
+            new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+          ],
         });
         return;
       }
 
       if (interaction.commandName === "sessions") {
-        const thread = interaction.channel?.isThread() ? interaction.channel : undefined;
+        const thread = interaction.channel?.isThread()
+          ? interaction.channel
+          : undefined;
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
           thread,
         });
-        await replyToInteraction(interaction, await runtime.describeAvailableSessions(workspaceKey));
+        await replyToInteraction(
+          interaction,
+          await runtime.describeAvailableSessions(workspaceKey),
+        );
         return;
       }
 
@@ -1535,7 +2060,9 @@ export function registerDiscordPortInteractionHandler({
         const binding = runtime.bindThread(thread);
         const aborted = await runtime.adapter.abort(binding.conversationKey);
         await interaction.reply({
-          content: aborted ? "Active run aborted." : "No active session to abort.",
+          content: aborted
+            ? "Active run aborted."
+            : "No active session to abort.",
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1547,7 +2074,9 @@ export function registerDiscordPortInteractionHandler({
         const binding = runtime.bindThread(thread);
         const reset = await runtime.adapter.reset(binding.conversationKey);
         await interaction.reply({
-          content: reset ? "Cleared the bound pi session for this thread." : "No bound session to clear.",
+          content: reset
+            ? "Cleared the bound pi session for this thread."
+            : "No bound session to clear.",
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1560,7 +2089,8 @@ export function registerDiscordPortInteractionHandler({
         await runtime.adapter.abort(binding.conversationKey).catch(() => false);
         await runtime.adapter.reset(binding.conversationKey);
         await interaction.reply({
-          content: "This thread session was refreshed. Send your next message again to start a clean session.",
+          content:
+            "This thread session was refreshed. Send your next message again to start a clean session.",
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -1568,19 +2098,25 @@ export function registerDiscordPortInteractionHandler({
 
       if (interaction.commandName === "project-list") {
         requireGuild(interaction);
-        await replyToInteraction(interaction, await runtime.describeManagedProjects(interaction.guild!));
+        await replyToInteraction(
+          interaction,
+          await runtime.describeManagedProjects(interaction.guild!),
+        );
         return;
       }
 
       if (interaction.commandName === "project-list-available") {
         requireGuild(interaction);
-        await replyToInteraction(interaction, await runtime.describeAvailableProjects());
+        await replyToInteraction(
+          interaction,
+          await runtime.describeAvailableProjects(),
+        );
         return;
       }
 
       if (interaction.commandName === "diff") {
         const workspaceRoot = getCritiqueWorkspaceRoot(interaction, runtime);
-        if (!await isGitWorkspace(workspaceRoot)) {
+        if (!(await isGitWorkspace(workspaceRoot))) {
           await interaction.reply({
             content: `Workspace is not inside a Git repository: ${workspaceRoot}`,
             flags: MessageFlags.Ephemeral,
@@ -1593,13 +2129,16 @@ export function registerDiscordPortInteractionHandler({
           cwd: workspaceRoot,
           title: `${path.basename(workspaceRoot)}: Discord /diff`,
         });
-        await replyToInteraction(interaction, result?.url ?? result?.error ?? "No changes to show.");
+        await replyToInteraction(
+          interaction,
+          result?.url ?? result?.error ?? "No changes to show.",
+        );
         return;
       }
 
       if (interaction.commandName === "review") {
         const workspaceRoot = getCritiqueWorkspaceRoot(interaction, runtime);
-        if (!await isGitWorkspace(workspaceRoot)) {
+        if (!(await isGitWorkspace(workspaceRoot))) {
           await interaction.reply({
             content: `Workspace is not inside a Git repository: ${workspaceRoot}`,
             flags: MessageFlags.Ephemeral,
@@ -1609,7 +2148,10 @@ export function registerDiscordPortInteractionHandler({
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const result = await reviewGitDiff({ cwd: workspaceRoot });
-        await replyToInteraction(interaction, result?.url ?? result?.error ?? "No review output was generated.");
+        await replyToInteraction(
+          interaction,
+          result?.url ?? result?.error ?? "No review output was generated.",
+        );
         return;
       }
 
@@ -1619,7 +2161,9 @@ export function registerDiscordPortInteractionHandler({
         await replyToInteraction(
           interaction,
           requests.length > 0
-            ? requests.map((request) => `${request.id} :: ${request.summary}`).join("\n\n")
+            ? requests
+                .map((request) => `${request.id} :: ${request.summary}`)
+                .join("\n\n")
             : "No pending access requests.",
         );
         return;
@@ -1641,30 +2185,52 @@ export function registerDiscordPortInteractionHandler({
 
           const menu = new StringSelectMenuBuilder()
             .setCustomId(OUTSIDE_WORKSPACE_PROJECT_SELECT)
-            .setPlaceholder(`Select a project to ${mode} outside-workspace access`)
+            .setPlaceholder(
+              `Select a project to ${mode} outside-workspace access`,
+            )
             .setMinValues(1)
             .setMaxValues(1)
-            .addOptions(...projects.map((project) => ({
-              label: (project.name?.trim() || project.channelId).slice(0, 100),
-              value: project.channelId,
-              description: `${runtime.adapter.isOutsideWorkspaceAllowed(runtime.buildWorkspaceKey(interaction.guildId!, project.channelId)) ? "enabled" : "disabled"} • ${project.root}`.slice(0, 100),
-            })));
+            .addOptions(
+              ...projects.map((project) => ({
+                label: (project.name?.trim() || project.channelId).slice(
+                  0,
+                  100,
+                ),
+                value: project.channelId,
+                description:
+                  `${runtime.adapter.isOutsideWorkspaceAllowed(runtime.buildWorkspaceKey(interaction.guildId!, project.channelId)) ? "enabled" : "disabled"} • ${project.root}`.slice(
+                    0,
+                    100,
+                  ),
+              })),
+            );
 
           await interaction.reply({
             content: `Choose a project to ${mode} outside-workspace access.`,
             flags: MessageFlags.Ephemeral,
-            components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+            components: [
+              new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+                menu,
+              ),
+            ],
           });
           return;
         }
 
         const channel = interaction.channel;
-        const workspaceChannelId = channel?.isThread() ? (channel.parentId ?? interaction.channelId) : interaction.channelId;
+        const workspaceChannelId = channel?.isThread()
+          ? (channel.parentId ?? interaction.channelId)
+          : interaction.channelId;
         if (!runtime.adapter.isManagedProjectChannel(workspaceChannelId)) {
-          throw new Error("Use this command in the host control channel, a managed project channel, or a session thread.");
+          throw new Error(
+            "Use this command in the host control channel, a managed project channel, or a session thread.",
+          );
         }
 
-        const workspaceKey = runtime.buildWorkspaceKey(interaction.guildId!, workspaceChannelId);
+        const workspaceKey = runtime.buildWorkspaceKey(
+          interaction.guildId!,
+          workspaceChannelId,
+        );
         const allowed = mode === "allow";
         runtime.adapter.setOutsideWorkspaceAllowed(workspaceKey, allowed);
         await interaction.reply({
@@ -1681,16 +2247,25 @@ export function registerDiscordPortInteractionHandler({
 
       if (interaction.commandName === "status") {
         const content = !interaction.guildId
-          ? runtime.buildDirectMessageStatus(interaction.channelId, interaction.user.username)
+          ? runtime.buildDirectMessageStatus(
+              interaction.channelId,
+              interaction.user.username,
+            )
           : interaction.channel?.isThread()
             ? runtime.buildThreadStatus(interaction.channel)
-            : runtime.buildGuildStatus({ guildId: interaction.guildId, channelId: interaction.channelId });
+            : runtime.buildGuildStatus({
+                guildId: interaction.guildId,
+                channelId: interaction.channelId,
+              });
 
         await replyToInteraction(interaction, content);
         return;
       }
 
-      if (interaction.commandName.startsWith("multi-auth") && multiAuthAccountManager) {
+      if (
+        interaction.commandName.startsWith("multi-auth") &&
+        multiAuthAccountManager
+      ) {
         await handleMultiAuthCommand(interaction, multiAuthAccountManager);
         return;
       }
@@ -1717,8 +2292,12 @@ export function registerDiscordPortInteractionHandler({
         const skillArgs = interaction.options.getString("prompt")?.trim();
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
-        const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction), { thinkingVisible });
+        const thinkingVisible =
+          runtime.adapter.getThinkingVisibility(conversationKey);
+        const renderer = new LiveDiscordRunRenderer(
+          createInteractionLiveMessageTarget(interaction),
+          { thinkingVisible },
+        );
         renderer.setSkillContext(skillCommand.name, skillArgs);
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
         try {
@@ -1736,7 +2315,10 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
-      if (interaction.commandName === "compact" || interaction.commandName === "auto-compact") {
+      if (
+        interaction.commandName === "compact" ||
+        interaction.commandName === "auto-compact"
+      ) {
         const thread = requireSessionThreadIfGuild(interaction);
         const conversationKey = runtime.getConversationKeyForLocation({
           guildId: interaction.guildId,
@@ -1747,7 +2329,8 @@ export function registerDiscordPortInteractionHandler({
         if (interaction.commandName === "compact") {
           await interaction.deferReply({ flags: MessageFlags.Ephemeral });
           try {
-            const success = await runtime.adapter.compactSession(conversationKey);
+            const success =
+              await runtime.adapter.compactSession(conversationKey);
             await interaction.editReply({
               content: success
                 ? "✅ Context compaction completed successfully."
@@ -1755,24 +2338,35 @@ export function registerDiscordPortInteractionHandler({
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            await interaction.editReply({ content: `❌ Compaction failed: ${msg}` });
+            await interaction.editReply({
+              content: `❌ Compaction failed: ${msg}`,
+            });
           }
           return;
         }
 
-        const currentEnabled = runtime.adapter.getAutoCompactionEnabled(conversationKey);
-        runtime.adapter.setAutoCompactionEnabled(conversationKey, !currentEnabled);
+        const currentEnabled =
+          runtime.adapter.getAutoCompactionEnabled(conversationKey);
+        runtime.adapter.setAutoCompactionEnabled(
+          conversationKey,
+          !currentEnabled,
+        );
         await interaction.reply({
           content: `♻️ Automatic compaction is now ${currentEnabled ? "disabled" : "enabled"}.`,
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
-    } catch (error) {      const message = error instanceof Error ? error.message : String(error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       if (interaction.deferred || interaction.replied) {
-        await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        await interaction
+          .followUp({ content: message, flags: MessageFlags.Ephemeral })
+          .catch(() => undefined);
       } else {
-        await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+        await interaction
+          .reply({ content: message, flags: MessageFlags.Ephemeral })
+          .catch(() => undefined);
       }
     }
   });

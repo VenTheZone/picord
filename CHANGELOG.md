@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.0 (2026-04-10)
+
+### Fixed
+- Host control channel is now always included in the effective allowed channel list,
+  resolving a catch-22 where `/login` could not be used anywhere: the host channel
+  was not whitelisted, and the OAuth flow components required the host channel.
+- OAuth login completion now syncs credentials to multi-auth rotation via
+  `getProviderStatus` + `autoActivatePreferredCredentials`, so newly logged-in
+  accounts appear in `/multi-auth status` immediately instead of waiting for the
+  next `acquireCredential` call. Gracefully no-ops when multi-auth plugin is absent.
+- Direct `/login provider:X key:Y` slash-command path now calls
+  `addApiKeyCredential()` to sync with multi-auth rotation, matching the behavior
+  of the modal-based API key flow. Gracefully no-ops when multi-auth plugin is absent.
+- Round-robin `activeIndex` now advances after every non-manual credential selection
+  across all rotation modes (round-robin, usage-based, balancer). Previously,
+  usage-based and balancer modes left `activeIndex` on the credential just used,
+  causing the round-robin fallback in `getRoundRobinCandidateIndex` to re-scan
+  from the same credential and pick it again when usage data was stale.
+- `/login` without options now checks `isHostControlChannel` before rendering
+  the OAuth provider select menu, giving an early clear message pointing to the
+  host channel instead of failing mid-flow when the user picks a provider.
+
 ## Unreleased
 
 ### Changed
