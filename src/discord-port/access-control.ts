@@ -63,6 +63,7 @@ export async function buildEffectiveAccessConfig(
       ...config.allowedChannelIds,
       ...Object.keys(config.workspaceRoots),
       ...adapter.listManagedProjects().map((project) => project.channelId),
+      ...(config.hostChannelId ? [config.hostChannelId] : []),
     ]),
     allowedRoleIds: await resolveAllowedRoleIds(config, guild),
   };
