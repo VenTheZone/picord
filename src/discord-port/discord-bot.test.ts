@@ -49,6 +49,7 @@ function createRuntimeStub() {
     config: { hostChannelName: "host" },
     isManagedProjectChannel: vi.fn((channelId: string) => channelId === "project-1"),
     registerLiveRenderer: vi.fn(),
+    sealLiveRenderer: vi.fn(async () => undefined),
     clearLiveRenderer: vi.fn(),
     respond: vi.fn(async ({ promptText }: { promptText: string }) => `response:${promptText}`),
     abort: vi.fn(async () => true),
@@ -185,6 +186,9 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
+    expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-1",
+    );
     expect(runtime.adapter.steer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
       "change direction",

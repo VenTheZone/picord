@@ -34,17 +34,12 @@ interface ThinkingEntry {
   text: string;
 }
 
-interface UserEntry {
-  kind: "user";
-  text: string;
-}
-
 interface ToolTimelineEntry {
   kind: "tool";
   tool: ToolEntry;
 }
 
-type TimelineEntry = AssistantEntry | ThinkingEntry | UserEntry | ToolTimelineEntry;
+type TimelineEntry = AssistantEntry | ThinkingEntry | ToolTimelineEntry;
 
 export interface LiveMessagePayload {
   content?: string;
@@ -426,7 +421,6 @@ export class LiveDiscordRunRenderer {
       return;
     }
 
-
     if (update.type === "tool_start") {
       if (this.tools.has(update.toolCallId)) return;
       this.activeAssistantEntry = undefined;
@@ -471,6 +465,34 @@ export class LiveDiscordRunRenderer {
       entry.detail = update.isError ? formatFailureDetail(update.detail ?? update.args) : undefined;
       this.scheduleFlush();
     }
+  }
+
+  /**
+   * Seal current Discord messages — final flush, then stop editing them.
+   * The renderer stays alive to create new follow-up messages for the continuation.
+   * Used when the user interrupts mid-stream: their message appears in chat
+   * naturally, and the AI continues in a new message below.
+   */
+  async sealCurrentMessages(): Promise<void> {
+    if (this.finalized) return;
+
+    // Cancel any pending timer and do one final flush
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    await this.flush();
+
+    // Stop editing the current handles — they're sealed.
+    // Next flush will create new follow-up messages.
+    this.handles.length = 0;
+
+    // Reset timeline for the continuation phase
+    this.timeline.length = 0;
+    this.activeAssistantEntry = undefined;
+    this.activeThinkingEntry = undefined;
+    this.tools.clear();
+    this.sawAssistantDelta = false;
   }
 
   async finalize(finalResponse: string): Promise<void> {
@@ -533,10 +555,11 @@ export class LiveDiscordRunRenderer {
         lines.push(`🧠 Thinking:\n${text}`, "");
         continue;
       }
-    if (entry.kind === "user") {
-      const text = entry.text.trim();
-      if (!text) continue;
-      const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
+
+      if (entry.kind === "tool") {
+        lines.push(formatToolLine(entry.tool), "");
+        continue;
+      }
     }
 
     // Show thinking placeholder when thinking is active but hidden

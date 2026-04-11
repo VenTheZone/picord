@@ -115,6 +115,10 @@ export function registerDiscordPortBot({
         const conversationKey = `discord:dm:${message.channelId}`;
 
         if (runtime.adapter.isStreaming(conversationKey)) {
+          // Seal the current AI message so it stops editing,
+          // then steer — the user's Discord message appears between
+          // the sealed message and the AI's new follow-up.
+          await runtime.adapter.sealLiveRenderer(conversationKey);
           const steered = await runtime.adapter.steer(conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
           if (steered) return;
           // If steer failed (no session), fall through to full respond.
@@ -160,6 +164,10 @@ export function registerDiscordPortBot({
         const binding = runtime.bindThread(thread);
 
         if (runtime.adapter.isStreaming(binding.conversationKey)) {
+          // Seal the current AI message so it stops editing,
+          // then steer — the user's Discord message appears between
+          // the sealed message and the AI's new follow-up.
+          await runtime.adapter.sealLiveRenderer(binding.conversationKey);
           const steered = await runtime.adapter.steer(binding.conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
           if (steered) return;
           // If steer failed (no session), fall through to full respond.

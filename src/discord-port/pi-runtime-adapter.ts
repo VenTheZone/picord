@@ -155,6 +155,12 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     this.liveRenderers.set(conversationKey, { renderer, runId });
   }
 
+  async sealLiveRenderer(conversationKey: string): Promise<void> {
+    const current = this.liveRenderers.get(conversationKey);
+    if (!current) return;
+    await current.renderer.sealCurrentMessages();
+  }
+
   clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void {
     const current = this.liveRenderers.get(conversationKey);
     if (!current) return;

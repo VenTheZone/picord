@@ -81,6 +81,7 @@ export interface DiscordPortRuntimeAdapter {
   completeProviderOAuthLogin(providerId: string, userId: string, codeOrUrl: string): Promise<void>;
   cancelProviderOAuthLogin(userId: string): boolean;
   registerLiveRenderer(conversationKey: string, renderer: LiveDiscordRunRenderer, runId?: number): void;
+  sealLiveRenderer(conversationKey: string): Promise<void>;
   clearLiveRenderer(conversationKey: string, renderer?: LiveDiscordRunRenderer): void;
   restartRuntime(options?: { notifyChannelId?: string; requestedByUserId?: string; requestedByTag?: string }): Promise<void>;
   restartSession(conversationKey: string, workspaceKey: string): Promise<boolean>;

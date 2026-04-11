@@ -112,6 +112,44 @@ describe("live discord renderer helpers", () => {
     expect(payloads.some((payload) => payload.content?.includes("✅ `read` `src/index.ts`"))).toBe(true);
   });
 
+  it("seals current messages and continues in new follow-ups", async () => {
+    const payloads: LiveMessagePayload[] = [];
+    const makeHandle = (initial: LiveMessagePayload) => {
+      payloads.push(initial);
+      return {
+        edit: async (next: LiveMessagePayload) => {
+          payloads.push(next);
+        },
+      };
+    };
+
+    const renderer = new LiveDiscordRunRenderer({
+      ensurePrimary: async (payload) => makeHandle(payload),
+      createFollowUp: async (payload) => makeHandle(payload),
+    });
+
+    // Phase 1: AI streams some content
+    await renderer.onUpdate({ type: "assistant_delta", delta: "Working on it..." });
+    await renderer.onUpdate({ type: "tool_start", toolCallId: "t1", toolName: "bash", args: { command: "npm test" } });
+
+    // Seal — simulates user interrupting mid-stream
+    await renderer.sealCurrentMessages();
+
+    const beforeSealCount = payloads.length;
+    const beforeSeal = payloads.map((p) => p.content ?? "").join("|||");
+    expect(beforeSeal).toContain("Working on it...");
+    expect(beforeSeal).toContain("bash");
+
+    // Phase 2: AI continues after steer
+    await renderer.onUpdate({ type: "assistant_delta", delta: "Checking tests now." });
+    await renderer.finalize("Done.");
+
+    const afterSeal = payloads.slice(beforeSealCount).map((p) => p.content ?? "").join("|||");
+    expect(afterSeal).toContain("Checking tests now.");
+    // The sealed content should NOT reappear in the follow-up
+    expect(afterSeal).not.toContain("Working on it...");
+  });
+
   it("keeps output free of interactive UI clutter", async () => {
     const payloads: LiveMessagePayload[] = [];
     const makeHandle = (initial: LiveMessagePayload) => {
