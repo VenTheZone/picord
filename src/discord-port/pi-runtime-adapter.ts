@@ -217,6 +217,12 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.steer(conversationKey, text);
   }
 
+  notifyUserMessage(conversationKey: string, text: string): void {
+    const current = this.liveRenderers.get(conversationKey);
+    if (!current) return;
+    void current.renderer.onUpdate({ type: "user_message", text });
+  }
+
   reset(conversationKey: string): Promise<boolean> {
     return this.sessionPool.reset(conversationKey);
   }

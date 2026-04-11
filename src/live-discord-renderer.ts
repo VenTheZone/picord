@@ -9,6 +9,7 @@ export type PiLiveUpdate =
   | { type: "thinking_start" }
   | { type: "thinking_delta"; delta: string }
   | { type: "thinking_end" }
+  | { type: "user_message"; text: string }
   | { type: "run_state"; modelReference?: string; thinkingLevel?: string; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_update"; toolCallId: string; toolName: string; args?: unknown; detail?: unknown }
@@ -34,12 +35,17 @@ interface ThinkingEntry {
   text: string;
 }
 
+interface UserEntry {
+  kind: "user";
+  text: string;
+}
+
 interface ToolTimelineEntry {
   kind: "tool";
   tool: ToolEntry;
 }
 
-type TimelineEntry = AssistantEntry | ThinkingEntry | ToolTimelineEntry;
+type TimelineEntry = AssistantEntry | ThinkingEntry | UserEntry | ToolTimelineEntry;
 
 export interface LiveMessagePayload {
   content?: string;
@@ -419,6 +425,13 @@ export class LiveDiscordRunRenderer {
       return;
     }
 
+    if (update.type === "user_message") {
+      this.activeAssistantEntry = undefined;
+      this.timeline.push({ kind: "user", text: update.text });
+      this.scheduleFlush();
+      return;
+    }
+
     if (update.type === "tool_start") {
       if (this.tools.has(update.toolCallId)) return;
       this.activeAssistantEntry = undefined;
@@ -525,6 +538,14 @@ export class LiveDiscordRunRenderer {
         lines.push(`🧠 Thinking:\n${text}`, "");
         continue;
       }
+    if (entry.kind === "user") {
+      const text = entry.text.trim();
+      if (!text) continue;
+      const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
+      lines.push(`👤 **You:**\n> ${preview.replace(/\n/g, "\n> ")}`, "");
+      continue;
+    }
+
 
       lines.push(formatToolLine(entry.tool), "");
     }
