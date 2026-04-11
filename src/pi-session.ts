@@ -730,7 +730,7 @@ export class PiSessionPool {
   async compact(context: { conversationKey: string; instructions?: string }): Promise<CompactionResult | undefined> {
     const handle = this.sessions.get(context.conversationKey);
     if (!handle) return undefined;
-    return handle.session.compact(context.instructions);
+    return this.runExclusive(context.conversationKey, () => handle.session.compact(context.instructions));
   }
 
   getAutoCompactionEnabled(conversationKey: string): boolean {

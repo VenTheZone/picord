@@ -2334,13 +2334,23 @@ export function registerDiscordPortInteractionHandler({
             await interaction.editReply({
               content: success
                 ? "✅ Context compaction completed successfully."
-                : "⚠️ Context compaction was not performed (context likely too small).",
+                : "⚠️ No active session found to compact.",
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            await interaction.editReply({
-              content: `❌ Compaction failed: ${msg}`,
-            });
+            if (msg === "Already compacted") {
+              await interaction.editReply({
+                content: "⚠️ Session was already compacted. Send more messages before compacting again.",
+              });
+            } else if (msg === "Nothing to compact (session too small)") {
+              await interaction.editReply({
+                content: "⚠️ Context is too small to compact. Compaction only works when the context is large enough to summarize.",
+              });
+            } else {
+              await interaction.editReply({
+                content: `❌ Compaction failed: ${msg}`,
+              });
+            }
           }
           return;
         }
