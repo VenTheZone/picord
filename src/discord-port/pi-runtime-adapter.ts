@@ -209,6 +209,14 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.abort(conversationKey);
   }
 
+  isStreaming(conversationKey: string): boolean {
+    return this.sessionPool.isStreaming(conversationKey);
+  }
+
+  steer(conversationKey: string, text: string): Promise<boolean> {
+    return this.sessionPool.steer(conversationKey, text);
+  }
+
   reset(conversationKey: string): Promise<boolean> {
     return this.sessionPool.reset(conversationKey);
   }

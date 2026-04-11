@@ -86,6 +86,8 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
     setOutsideWorkspaceAllowed: () => undefined,
     resolveAccessRequest: () => undefined,
     abort: async () => false,
+    isStreaming: () => false,
+    steer: async () => true,
     reset: async () => false,
     resumeSession: async () => ({ id: "session-1", cwd: process.cwd() }),
     ...overrides,

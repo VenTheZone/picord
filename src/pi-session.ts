@@ -430,6 +430,18 @@ export class PiSessionPool {
     return true;
   }
 
+  isStreaming(conversationKey: string): boolean {
+    const handle = this.sessions.get(conversationKey);
+    return handle?.session.isStreaming ?? false;
+  }
+
+  async steer(conversationKey: string, text: string): Promise<boolean> {
+    const handle = this.sessions.get(conversationKey);
+    if (!handle) return false;
+    await handle.session.steer(text);
+    return true;
+  }
+
   async listSessionsForWorkspace(workspaceKey: string, limit: number = 20): Promise<Array<{
     id: string;
     path: string;

@@ -104,6 +104,8 @@ export interface DiscordPortRuntimeAdapter {
   isOutsideWorkspaceAllowed(workspaceKey: string): boolean;
   setOutsideWorkspaceAllowed(workspaceKey: string, allowed: boolean): void;
   resolveAccessRequest(requestId: string, mode: ApprovalDecisionMode): AccessRequest | undefined;
+  isStreaming(conversationKey: string): boolean;
+  steer(conversationKey: string, text: string): Promise<boolean>;
   abort(conversationKey: string): Promise<boolean>;
   reset(conversationKey: string): Promise<boolean>;
   restartSession(conversationKey: string, workspaceKey: string): Promise<boolean>;

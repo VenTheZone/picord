@@ -52,6 +52,8 @@ function createRuntimeStub() {
     clearLiveRenderer: vi.fn(),
     respond: vi.fn(async ({ promptText }: { promptText: string }) => `response:${promptText}`),
     abort: vi.fn(async () => true),
+    isStreaming: vi.fn(() => false),
+    steer: vi.fn(async () => true),
   };
 
   return {
@@ -150,6 +152,81 @@ describe("discord-bot message flow", () => {
       conversationKey: "discord:dm:dm-1",
       runId: 1,
     }));
+  });
+
+  it("steers instead of aborting when the session is already streaming", async () => {
+    const client = createClientStub();
+    const runtime = createRuntimeStub();
+    runtime.adapter.isStreaming.mockReturnValue(true);
+
+    registerDiscordPortBot({ client, runtime, enableMessageContent: true });
+
+    const thread = {
+      id: "thread-1",
+      parentId: "project-1",
+      guildId: "guild-1",
+      name: "session thread",
+      type: ChannelType.PublicThread,
+      sendTyping: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
+      isThread: () => true,
+    };
+
+    const message = {
+      author: { bot: false, username: "V", id: "user-1" },
+      content: "change direction",
+      attachments: { size: 0 },
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "thread-1",
+      channel: thread,
+      reply: vi.fn(async () => undefined),
+    } as any;
+
+    await client.__emit(Events.MessageCreate, message);
+
+    expect(runtime.adapter.steer).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-1",
+      "change direction",
+    );
+    expect(runtime.adapter.abort).not.toHaveBeenCalled();
+    expect(runtime.adapter.respond).not.toHaveBeenCalled();
+  });
+
+  it("falls back to respond when steer returns false (no session)", async () => {
+    const client = createClientStub();
+    const runtime = createRuntimeStub();
+    runtime.adapter.isStreaming.mockReturnValue(true);
+    runtime.adapter.steer.mockResolvedValue(false);
+
+    registerDiscordPortBot({ client, runtime, enableMessageContent: true });
+
+    const thread = {
+      id: "thread-1",
+      parentId: "project-1",
+      guildId: "guild-1",
+      name: "session thread",
+      type: ChannelType.PublicThread,
+      sendTyping: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
+      isThread: () => true,
+    };
+
+    const message = {
+      author: { bot: false, username: "V", id: "user-1" },
+      content: "hello",
+      attachments: { size: 0 },
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "thread-1",
+      channel: thread,
+      reply: vi.fn(async () => undefined),
+    } as any;
+
+    await client.__emit(Events.MessageCreate, message);
+
+    expect(runtime.adapter.steer).toHaveBeenCalled();
+    expect(runtime.adapter.respond).toHaveBeenCalled();
   });
 
   it("starts project-channel messages in a new thread with latest-run semantics", async () => {

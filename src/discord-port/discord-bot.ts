@@ -112,11 +112,18 @@ export function registerDiscordPortBot({
       }
 
       if (!message.inGuild()) {
+        const conversationKey = `discord:dm:${message.channelId}`;
+
+        if (runtime.adapter.isStreaming(conversationKey)) {
+          const steered = await runtime.adapter.steer(conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
+          if (steered) return;
+          // If steer failed (no session), fall through to full respond.
+        }
+
         if ("sendTyping" in message.channel) {
           await message.channel.sendTyping().catch(() => undefined);
         }
 
-        const conversationKey = `discord:dm:${message.channelId}`;
         const runId = nextRunId(conversationKey);
         await runtime.adapter.abort(conversationKey).catch(() => false);
         const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel));
@@ -149,12 +156,19 @@ export function registerDiscordPortBot({
       }
 
       if (isThreadChannel(message.channel)) {
+        const thread = message.channel as Parameters<typeof runtime.continueThread>[0]["thread"];
+        const binding = runtime.bindThread(thread);
+
+        if (runtime.adapter.isStreaming(binding.conversationKey)) {
+          const steered = await runtime.adapter.steer(binding.conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
+          if (steered) return;
+          // If steer failed (no session), fall through to full respond.
+        }
+
         if ("sendTyping" in message.channel) {
           await message.channel.sendTyping().catch(() => undefined);
         }
 
-        const thread = message.channel as Parameters<typeof runtime.continueThread>[0]["thread"];
-        const binding = runtime.bindThread(thread);
         const runId = nextRunId(binding.conversationKey);
         await runtime.adapter.abort(binding.conversationKey).catch(() => false);
         const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
