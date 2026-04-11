@@ -54,7 +54,6 @@ function createRuntimeStub() {
     abort: vi.fn(async () => true),
     isStreaming: vi.fn(() => false),
     steer: vi.fn(async () => true),
-    notifyUserMessage: vi.fn(),
   };
 
   return {

@@ -115,12 +115,8 @@ export function registerDiscordPortBot({
         const conversationKey = `discord:dm:${message.channelId}`;
 
         if (runtime.adapter.isStreaming(conversationKey)) {
-          const prompt = buildPromptFromMessage(message, promptText);
-          const steered = await runtime.adapter.steer(conversationKey, prompt).catch(() => false);
-          if (steered) {
-            runtime.adapter.notifyUserMessage(conversationKey, prompt);
-            return;
-          }
+          const steered = await runtime.adapter.steer(conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
+          if (steered) return;
           // If steer failed (no session), fall through to full respond.
         }
 
@@ -164,12 +160,8 @@ export function registerDiscordPortBot({
         const binding = runtime.bindThread(thread);
 
         if (runtime.adapter.isStreaming(binding.conversationKey)) {
-          const prompt = buildPromptFromMessage(message, promptText);
-          const steered = await runtime.adapter.steer(binding.conversationKey, prompt).catch(() => false);
-          if (steered) {
-            runtime.adapter.notifyUserMessage(binding.conversationKey, prompt);
-            return;
-          }
+          const steered = await runtime.adapter.steer(binding.conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
+          if (steered) return;
           // If steer failed (no session), fall through to full respond.
         }
 

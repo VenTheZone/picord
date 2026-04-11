@@ -9,7 +9,6 @@ export type PiLiveUpdate =
   | { type: "thinking_start" }
   | { type: "thinking_delta"; delta: string }
   | { type: "thinking_end" }
-  | { type: "user_message"; text: string }
   | { type: "run_state"; modelReference?: string; thinkingLevel?: string; supportsThinking?: boolean; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_update"; toolCallId: string; toolName: string; args?: unknown; detail?: unknown }
@@ -265,7 +264,7 @@ export function createChannelLiveMessageTarget(channel: {
   };
 }
 
-export function createInteractionLiveMessageTarget(interaction: ChatInputCommandInteraction): LiveMessageTarget {
+export function createInteractionLiveMessageTarget(interaction: ChatInputCommandInteraction, ephemeral: boolean = true): LiveMessageTarget {
   let primaryInitialized = false;
 
   return {
@@ -274,7 +273,7 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(request);
       } else {
-        await interaction.reply({ ...request, ephemeral: true });
+        await interaction.reply({ ...request, ephemeral });
       }
       primaryInitialized = true;
       return {
@@ -285,7 +284,7 @@ export function createInteractionLiveMessageTarget(interaction: ChatInputCommand
     },
     createFollowUp: async (payload) => {
       if (!primaryInitialized && !(interaction.deferred || interaction.replied)) {
-        await interaction.reply({ content: payload.content, embeds: payload.embeds, components: payload.components, ephemeral: true });
+        await interaction.reply({ content: payload.content, embeds: payload.embeds, components: payload.components, ephemeral });
         primaryInitialized = true;
         return {
           edit: async (next) => {
@@ -427,12 +426,6 @@ export class LiveDiscordRunRenderer {
       return;
     }
 
-    if (update.type === "user_message") {
-      this.activeAssistantEntry = undefined;
-      this.timeline.push({ kind: "user", text: update.text });
-      this.scheduleFlush();
-      return;
-    }
 
     if (update.type === "tool_start") {
       if (this.tools.has(update.toolCallId)) return;
@@ -544,12 +537,6 @@ export class LiveDiscordRunRenderer {
       const text = entry.text.trim();
       if (!text) continue;
       const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
-      lines.push(`👤 **You:**\n> ${preview.replace(/\n/g, "\n> ")}`, "");
-      continue;
-    }
-
-
-      lines.push(formatToolLine(entry.tool), "");
     }
 
     // Show thinking placeholder when thinking is active but hidden

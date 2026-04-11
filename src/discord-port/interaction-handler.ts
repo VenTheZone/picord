@@ -1956,7 +1956,7 @@ export function registerDiscordPortInteractionHandler({
         const thinkingVisible =
           runtime.adapter.getThinkingVisibility(conversationKey);
         const renderer = new LiveDiscordRunRenderer(
-          createInteractionLiveMessageTarget(interaction),
+          createInteractionLiveMessageTarget(interaction, false),
           { thinkingVisible },
         );
         runtime.adapter.registerLiveRenderer(conversationKey, renderer);
@@ -2291,11 +2291,11 @@ export function registerDiscordPortInteractionHandler({
         });
         const skillArgs = interaction.options.getString("prompt")?.trim();
 
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.deferReply(); // No ephemeral flag
         const thinkingVisible =
           runtime.adapter.getThinkingVisibility(conversationKey);
         const renderer = new LiveDiscordRunRenderer(
-          createInteractionLiveMessageTarget(interaction),
+          createInteractionLiveMessageTarget(interaction, false),
           { thinkingVisible },
         );
         renderer.setSkillContext(skillCommand.name, skillArgs);
