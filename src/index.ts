@@ -748,11 +748,24 @@ export default function picordExtension(pi: ExtensionAPI) {
     if (!promptText && message.attachments.size === 0) return;
 
     if (isDm) {
+      const conversationKey = getConversationKeyFromMessage(message);
+
+      if (sessionPool.isStreaming(conversationKey)) {
+        // Seal the current AI message so it stops editing,
+        // then abort — the user's Discord message appears between
+        // the sealed message and the AI's new follow-up.
+        const currentEntry = liveRenderers.get(conversationKey);
+        if (currentEntry) {
+          await currentEntry.renderer.sealCurrentMessages();
+        }
+        // Fall through to abort + new respond below.
+      }
+
       if ("sendTyping" in message.channel) {
         await message.channel.sendTyping();
       }
 
-      const conversationKey = getConversationKeyFromMessage(message);
+      await sessionPool.abort(conversationKey).catch(() => false);
       const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
       liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {
@@ -781,11 +794,24 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
 
     if (isThreadLikeChannel(message.channel)) {
+      const conversationKey = getConversationKeyFromMessage(message);
+
+      if (sessionPool.isStreaming(conversationKey)) {
+        // Seal the current AI message so it stops editing,
+        // then abort — the user's Discord message appears between
+        // the sealed message and the AI's new follow-up.
+        const currentEntry = liveRenderers.get(conversationKey);
+        if (currentEntry) {
+          await currentEntry.renderer.sealCurrentMessages();
+        }
+        // Fall through to abort + new respond below.
+      }
+
       if ("sendTyping" in message.channel) {
         await message.channel.sendTyping();
       }
 
-      const conversationKey = getConversationKeyFromMessage(message);
+      await sessionPool.abort(conversationKey).catch(() => false);
       const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
       liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {

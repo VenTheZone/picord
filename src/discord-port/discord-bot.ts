@@ -116,12 +116,14 @@ export function registerDiscordPortBot({
 
         if (runtime.adapter.isStreaming(conversationKey)) {
           // Seal the current AI message so it stops editing,
-          // then steer — the user's Discord message appears between
+          // then abort — the user's Discord message appears between
           // the sealed message and the AI's new follow-up.
+          // NOTE: we do NOT use steer() here because steer only queues a
+          // message for AFTER the current turn finishes — it does NOT
+          // interrupt the stream, so the AI would keep going without
+          // addressing the user's new input.
           await runtime.adapter.sealLiveRenderer(conversationKey);
-          const steered = await runtime.adapter.steer(conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
-          if (steered) return;
-          // If steer failed (no session), fall through to full respond.
+          // Fall through to abort + new respond below.
         }
 
         if ("sendTyping" in message.channel) {
@@ -165,12 +167,14 @@ export function registerDiscordPortBot({
 
         if (runtime.adapter.isStreaming(binding.conversationKey)) {
           // Seal the current AI message so it stops editing,
-          // then steer — the user's Discord message appears between
+          // then abort — the user's Discord message appears between
           // the sealed message and the AI's new follow-up.
+          // NOTE: we do NOT use steer() here because steer only queues a
+          // message for AFTER the current turn finishes — it does NOT
+          // interrupt the stream, so the AI would keep going without
+          // addressing the user's new input.
           await runtime.adapter.sealLiveRenderer(binding.conversationKey);
-          const steered = await runtime.adapter.steer(binding.conversationKey, buildPromptFromMessage(message, promptText)).catch(() => false);
-          if (steered) return;
-          // If steer failed (no session), fall through to full respond.
+          // Fall through to abort + new respond below.
         }
 
         if ("sendTyping" in message.channel) {

@@ -54,7 +54,6 @@ function createRuntimeStub() {
     respond: vi.fn(async ({ promptText }: { promptText: string }) => `response:${promptText}`),
     abort: vi.fn(async () => true),
     isStreaming: vi.fn(() => false),
-    steer: vi.fn(async () => true),
   };
 
   return {
@@ -155,7 +154,7 @@ describe("discord-bot message flow", () => {
     }));
   });
 
-  it("steers instead of aborting when the session is already streaming", async () => {
+  it("seals and aborts when the session is already streaming", async () => {
     const client = createClientStub();
     const runtime = createRuntimeStub();
     runtime.adapter.isStreaming.mockReturnValue(true);
@@ -189,48 +188,51 @@ describe("discord-bot message flow", () => {
     expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
     );
-    expect(runtime.adapter.steer).toHaveBeenCalledWith(
+    // After sealing, we abort the current run and start a new respond
+    expect(runtime.adapter.abort).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
-      "change direction",
     );
-    expect(runtime.adapter.abort).not.toHaveBeenCalled();
-    expect(runtime.adapter.respond).not.toHaveBeenCalled();
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
+      conversationKey: "discord:guild:guild-1:thread:thread-1",
+      promptText: "change direction",
+    }));
   });
 
-  it("falls back to respond when steer returns false (no session)", async () => {
+  it("aborts and responds when the session is streaming in a DM", async () => {
     const client = createClientStub();
     const runtime = createRuntimeStub();
     runtime.adapter.isStreaming.mockReturnValue(true);
-    runtime.adapter.steer.mockResolvedValue(false);
 
     registerDiscordPortBot({ client, runtime, enableMessageContent: true });
 
-    const thread = {
-      id: "thread-1",
-      parentId: "project-1",
-      guildId: "guild-1",
-      name: "session thread",
-      type: ChannelType.PublicThread,
+    const dmChannel = {
+      id: "dm-1",
+      type: ChannelType.DM,
       sendTyping: vi.fn(async () => undefined),
       send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
-      isThread: () => true,
+      isThread: () => false,
     };
 
     const message = {
       author: { bot: false, username: "V", id: "user-1" },
-      content: "hello",
+      content: "interrupt me",
       attachments: { size: 0 },
-      inGuild: () => true,
-      guildId: "guild-1",
-      channelId: "thread-1",
-      channel: thread,
+      inGuild: () => false,
+      channelId: "dm-1",
+      channel: dmChannel,
       reply: vi.fn(async () => undefined),
     } as any;
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.steer).toHaveBeenCalled();
-    expect(runtime.adapter.respond).toHaveBeenCalled();
+    expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
+      "discord:dm:dm-1",
+    );
+    expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:dm:dm-1");
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
+      conversationKey: "discord:dm:dm-1",
+      promptText: "interrupt me",
+    }));
   });
 
   it("starts project-channel messages in a new thread with latest-run semantics", async () => {
