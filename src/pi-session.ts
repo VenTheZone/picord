@@ -562,6 +562,7 @@ export class PiSessionPool {
           type: "run_state",
           modelReference: model ? `${model.provider}/${model.id}` : undefined,
           thinkingLevel: handle.session.thinkingLevel,
+          supportsThinking: handle.session.supportsThinking(),
           contextUsage: contextUsage
             ? {
                 tokens: contextUsage.tokens,

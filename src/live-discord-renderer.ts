@@ -10,7 +10,7 @@ export type PiLiveUpdate =
   | { type: "thinking_delta"; delta: string }
   | { type: "thinking_end" }
   | { type: "user_message"; text: string }
-  | { type: "run_state"; modelReference?: string; thinkingLevel?: string; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
+  | { type: "run_state"; modelReference?: string; thinkingLevel?: string; supportsThinking?: boolean; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_update"; toolCallId: string; toolName: string; args?: unknown; detail?: unknown }
   | { type: "tool_end"; toolCallId: string; toolName: string; isError: boolean; args?: unknown; detail?: unknown };
@@ -335,6 +335,7 @@ export class LiveDiscordRunRenderer {
   private skillDetails?: string;
   private runModelReference?: string;
   private runThinkingLevel?: string;
+  private runSupportsThinking?: boolean;
   private runContextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   private accessRequest?: { content: string; requestId?: string; handle?: EditableMessageHandle };
 
@@ -385,6 +386,7 @@ export class LiveDiscordRunRenderer {
     if (update.type === "run_state") {
       this.runModelReference = update.modelReference ?? this.runModelReference;
       this.runThinkingLevel = update.thinkingLevel ?? this.runThinkingLevel;
+      this.runSupportsThinking = update.supportsThinking ?? this.runSupportsThinking;
       this.runContextUsage = update.contextUsage ?? this.runContextUsage;
       this.scheduleFlush();
       return;
@@ -563,7 +565,9 @@ export class LiveDiscordRunRenderer {
 
     const metadata = [
       this.runModelReference ? `- Model: ${this.runModelReference}` : undefined,
-      this.runThinkingLevel ? `- Thinking: ${this.runThinkingLevel}` : undefined,
+      this.runThinkingLevel && (this.runThinkingLevel !== "off" || this.runSupportsThinking === true)
+        ? `- Thinking: ${this.runThinkingLevel === "off" ? "none" : this.runThinkingLevel}`
+        : undefined,
       contextLine,
     ].filter((line): line is string => Boolean(line));
 
