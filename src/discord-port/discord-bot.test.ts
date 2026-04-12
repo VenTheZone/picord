@@ -8,7 +8,10 @@ const {
 } = vi.hoisted(() => ({
   canAccessDiscordMessageMock: vi.fn(async () => ({ allowed: true })),
   replyToMessageMock: vi.fn(async () => undefined),
-  buildPromptFromMessageMock: vi.fn((message: { content: string }, promptText: string) => promptText || message.content),
+  buildPromptFromMessageMock: vi.fn(
+    (message: { content: string }, promptText: string) =>
+      promptText || message.content,
+  ),
 }));
 
 vi.mock("./access-control.js", () => ({
@@ -47,11 +50,16 @@ function createClientStub() {
 function createRuntimeStub() {
   const adapter = {
     config: { hostChannelName: "host" },
-    isManagedProjectChannel: vi.fn((channelId: string) => channelId === "project-1"),
+    isManagedProjectChannel: vi.fn(
+      (channelId: string) => channelId === "project-1",
+    ),
     registerLiveRenderer: vi.fn(),
     sealLiveRenderer: vi.fn(async () => undefined),
     clearLiveRenderer: vi.fn(),
-    respond: vi.fn(async ({ promptText }: { promptText: string }) => `response:${promptText}`),
+    respond: vi.fn(
+      async ({ promptText }: { promptText: string }) =>
+        `response:${promptText}`,
+    ),
     abort: vi.fn(async () => true),
     isStreaming: vi.fn(() => false),
   };
@@ -104,16 +112,20 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:guild:guild-1:thread:thread-1");
+    expect(runtime.adapter.abort).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-1",
+    );
     expect(runtime.adapter.registerLiveRenderer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
       expect.anything(),
       1,
     );
-    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
-      conversationKey: "discord:guild:guild-1:thread:thread-1",
-      runId: 1,
-    }));
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:guild:guild-1:thread:thread-1",
+        runId: 1,
+      }),
+    );
   });
 
   it("interrupts DM runs too instead of letting them pile up", async () => {
@@ -148,10 +160,12 @@ describe("discord-bot message flow", () => {
       expect.anything(),
       1,
     );
-    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
-      conversationKey: "discord:dm:dm-1",
-      runId: 1,
-    }));
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:dm:dm-1",
+        runId: 1,
+      }),
+    );
   });
 
   it("seals and aborts when the session is already streaming", async () => {
@@ -185,17 +199,22 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
+    // During interrupt: seal → clear → abort → new respond
     expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
     );
-    // After sealing, we abort the current run and start a new respond
+    expect(runtime.adapter.clearLiveRenderer).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-1",
+    );
     expect(runtime.adapter.abort).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
     );
-    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
-      conversationKey: "discord:guild:guild-1:thread:thread-1",
-      promptText: "change direction",
-    }));
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:guild:guild-1:thread:thread-1",
+        promptText: "change direction",
+      }),
+    );
   });
 
   it("aborts and responds when the session is streaming in a DM", async () => {
@@ -228,11 +247,16 @@ describe("discord-bot message flow", () => {
     expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
       "discord:dm:dm-1",
     );
+    expect(runtime.adapter.clearLiveRenderer).toHaveBeenCalledWith(
+      "discord:dm:dm-1",
+    );
     expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:dm:dm-1");
-    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
-      conversationKey: "discord:dm:dm-1",
-      promptText: "interrupt me",
-    }));
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:dm:dm-1",
+        promptText: "interrupt me",
+      }),
+    );
   });
 
   it("starts project-channel messages in a new thread with latest-run semantics", async () => {
@@ -270,7 +294,9 @@ describe("discord-bot message flow", () => {
       channelId: "project-1",
       channel,
       startThread: vi.fn(async (options: any) => {
-        expect(options.autoArchiveDuration).toBe(ThreadAutoArchiveDuration.OneDay);
+        expect(options.autoArchiveDuration).toBe(
+          ThreadAutoArchiveDuration.OneDay,
+        );
         return thread;
       }),
       reply: vi.fn(async () => undefined),
@@ -278,10 +304,14 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:guild:guild-1:thread:thread-2");
-    expect(runtime.adapter.respond).toHaveBeenCalledWith(expect.objectContaining({
-      conversationKey: "discord:guild:guild-1:thread:thread-2",
-      runId: 1,
-    }));
+    expect(runtime.adapter.abort).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-2",
+    );
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:guild:guild-1:thread:thread-2",
+        runId: 1,
+      }),
+    );
   });
 });

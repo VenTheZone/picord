@@ -8,7 +8,10 @@ import {
   type Message,
   type TextChannel,
 } from "discord.js";
-import { LiveDiscordRunRenderer, createChannelLiveMessageTarget } from "../live-discord-renderer.js";
+import {
+  LiveDiscordRunRenderer,
+  createChannelLiveMessageTarget,
+} from "../live-discord-renderer.js";
 import { canAccessDiscordMessage } from "./access-control.js";
 import { buildPromptFromMessage, replyToMessage } from "./message-helpers.js";
 import { registerDiscordPortInteractionHandler } from "./interaction-handler.js";
@@ -17,11 +20,20 @@ import type { DiscordPortRuntimeAdapter } from "./types.js";
 import type { AccountManager } from "./multi-auth-integration.js";
 
 function isThreadChannel(channel: Message["channel"]): boolean {
-  return channel.type === ChannelType.PublicThread || channel.type === ChannelType.PrivateThread;
+  return (
+    channel.type === ChannelType.PublicThread ||
+    channel.type === ChannelType.PrivateThread
+  );
 }
 
-function isProjectTextChannel(channel: Message["channel"], runtime: DiscordPortRuntime): channel is TextChannel {
-  return channel.type === ChannelType.GuildText && runtime.adapter.isManagedProjectChannel(channel.id);
+function isProjectTextChannel(
+  channel: Message["channel"],
+  runtime: DiscordPortRuntime,
+): channel is TextChannel {
+  return (
+    channel.type === ChannelType.GuildText &&
+    runtime.adapter.isManagedProjectChannel(channel.id)
+  );
 }
 
 function buildAutoThreadName(message: Message): string {
@@ -32,7 +44,10 @@ function buildAutoThreadName(message: Message): string {
   return (normalized || "picord session").slice(0, 80);
 }
 
-function isHostControlChannel(message: Message, runtime: DiscordPortRuntime): boolean {
+function isHostControlChannel(
+  message: Message,
+  runtime: DiscordPortRuntime,
+): boolean {
   if (!message.inGuild()) {
     return false;
   }
@@ -41,11 +56,16 @@ function isHostControlChannel(message: Message, runtime: DiscordPortRuntime): bo
     return message.channelId === runtime.adapter.config.hostChannelId;
   }
 
-  return message.channel.type === ChannelType.GuildText
-    && message.channel.name.toLowerCase() === runtime.adapter.config.hostChannelName;
+  return (
+    message.channel.type === ChannelType.GuildText &&
+    message.channel.name.toLowerCase() ===
+      runtime.adapter.config.hostChannelName
+  );
 }
 
-export function createDiscordPortClient(enableMessageContent: boolean = true): Client {
+export function createDiscordPortClient(
+  enableMessageContent: boolean = true,
+): Client {
   return new Client({
     intents: enableMessageContent
       ? [
@@ -82,7 +102,12 @@ export function registerDiscordPortBot({
   onError?: (message: string) => void;
   multiAuthAccountManager?: AccountManager;
 }) {
-  registerDiscordPortInteractionHandler({ client, runtime, _onReload: onReload, multiAuthAccountManager });
+  registerDiscordPortInteractionHandler({
+    client,
+    runtime,
+    _onReload: onReload,
+    multiAuthAccountManager,
+  });
   const latestRunIds = new Map<string, number>();
 
   const nextRunId = (conversationKey: string): number => {
@@ -91,106 +116,178 @@ export function registerDiscordPortBot({
     return runId;
   };
 
-  const isLatestRun = (conversationKey: string, runId: number): boolean => latestRunIds.get(conversationKey) === runId;
+  const isLatestRun = (conversationKey: string, runId: number): boolean =>
+    latestRunIds.get(conversationKey) === runId;
 
   if (enableMessageContent) {
     client.on(Events.MessageCreate, async (message) => {
-    try {
-      if (message.author.bot) {
-        return;
-      }
-
-      const promptText = message.content.trim();
-      if (!promptText && message.attachments.size === 0) {
-        return;
-      }
-
-      const access = await canAccessDiscordMessage(runtime.adapter.config, runtime.adapter, message);
-      if (!access.allowed) {
-        await replyToMessage(message, access.reason ?? "You are not allowed to use this bot here.");
-        return;
-      }
-
-      if (!message.inGuild()) {
-        const conversationKey = `discord:dm:${message.channelId}`;
-
-        if (runtime.adapter.isStreaming(conversationKey)) {
-          // Seal the current AI message so it stops editing,
-          // then abort — the user's Discord message appears between
-          // the sealed message and the AI's new follow-up.
-          // NOTE: we do NOT use steer() here because steer only queues a
-          // message for AFTER the current turn finishes — it does NOT
-          // interrupt the stream, so the AI would keep going without
-          // addressing the user's new input.
-          await runtime.adapter.sealLiveRenderer(conversationKey);
-          // Fall through to abort + new respond below.
+      try {
+        if (message.author.bot) {
+          return;
         }
 
-        if ("sendTyping" in message.channel) {
-          await message.channel.sendTyping().catch(() => undefined);
+        const promptText = message.content.trim();
+        if (!promptText && message.attachments.size === 0) {
+          return;
         }
 
-        const runId = nextRunId(conversationKey);
-        await runtime.adapter.abort(conversationKey).catch(() => false);
-        const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel));
-        runtime.adapter.registerLiveRenderer(conversationKey, renderer, runId);
-        try {
-          const dmResponse = await runtime.adapter.respond({
+        const access = await canAccessDiscordMessage(
+          runtime.adapter.config,
+          runtime.adapter,
+          message,
+        );
+        if (!access.allowed) {
+          await replyToMessage(
+            message,
+            access.reason ?? "You are not allowed to use this bot here.",
+          );
+          return;
+        }
+
+        if (!message.inGuild()) {
+          const conversationKey = `discord:dm:${message.channelId}`;
+
+          if (runtime.adapter.isStreaming(conversationKey)) {
+            // Clear the renderer BEFORE abort so old subscription events
+            // are dropped, not routed to the new renderer. Otherwise the
+            // old run's follow-up messages appear above the user's.
+            await runtime.adapter.sealLiveRenderer(conversationKey);
+            runtime.adapter.clearLiveRenderer(conversationKey);
+          }
+
+          if ("sendTyping" in message.channel) {
+            await message.channel.sendTyping().catch(() => undefined);
+          }
+
+          const runId = nextRunId(conversationKey);
+          await runtime.adapter.abort(conversationKey).catch(() => false);
+          const renderer = new LiveDiscordRunRenderer(
+            createChannelLiveMessageTarget(message.channel),
+          );
+          runtime.adapter.registerLiveRenderer(
             conversationKey,
-            workspaceKey: `discord:dm:${message.channelId}`,
-            sessionName: `dm-${message.author.username}`,
-            promptText: buildPromptFromMessage(message, promptText),
+            renderer,
             runId,
-          });
-          if (!isLatestRun(conversationKey, runId)) {
-            return;
+          );
+          try {
+            const dmResponse = await runtime.adapter.respond({
+              conversationKey,
+              workspaceKey: `discord:dm:${message.channelId}`,
+              sessionName: `dm-${message.author.username}`,
+              promptText: buildPromptFromMessage(message, promptText),
+              runId,
+            });
+            if (!isLatestRun(conversationKey, runId)) {
+              return;
+            }
+            await renderer.finalize(dmResponse);
+          } catch (error) {
+            if (!isLatestRun(conversationKey, runId)) {
+              return;
+            }
+            throw error;
+          } finally {
+            runtime.adapter.clearLiveRenderer(conversationKey, renderer);
           }
-          await renderer.finalize(dmResponse);
-        } catch (error) {
-          if (!isLatestRun(conversationKey, runId)) {
-            return;
-          }
-          throw error;
-        } finally {
-          runtime.adapter.clearLiveRenderer(conversationKey, renderer);
+          return;
         }
-        return;
-      }
 
-      if (isHostControlChannel(message, runtime)) {
-        return;
-      }
+        if (isHostControlChannel(message, runtime)) {
+          return;
+        }
 
-      if (isThreadChannel(message.channel)) {
-        const thread = message.channel as Parameters<typeof runtime.continueThread>[0]["thread"];
+        if (isThreadChannel(message.channel)) {
+          const thread = message.channel as Parameters<
+            typeof runtime.continueThread
+          >[0]["thread"];
+          const binding = runtime.bindThread(thread);
+
+          if (runtime.adapter.isStreaming(binding.conversationKey)) {
+            // Clear the renderer BEFORE abort so old subscription events
+            // are dropped, not routed to the new renderer. Otherwise the
+            // old run's follow-up messages appear above the user's.
+            await runtime.adapter.sealLiveRenderer(binding.conversationKey);
+            runtime.adapter.clearLiveRenderer(binding.conversationKey);
+          }
+
+          if ("sendTyping" in message.channel) {
+            await message.channel.sendTyping().catch(() => undefined);
+          }
+
+          const runId = nextRunId(binding.conversationKey);
+          await runtime.adapter
+            .abort(binding.conversationKey)
+            .catch(() => false);
+          const renderer = new LiveDiscordRunRenderer(
+            createChannelLiveMessageTarget(thread),
+          );
+          runtime.adapter.registerLiveRenderer(
+            binding.conversationKey,
+            renderer,
+            runId,
+          );
+          try {
+            const response = await runtime.adapter.respond({
+              conversationKey: binding.conversationKey,
+              workspaceKey: binding.workspaceKey,
+              sessionName: binding.sessionName,
+              promptText: buildPromptFromMessage(message, promptText),
+              runId,
+            });
+            if (!isLatestRun(binding.conversationKey, runId)) {
+              return;
+            }
+            await renderer.finalize(response);
+          } catch (error) {
+            if (!isLatestRun(binding.conversationKey, runId)) {
+              return;
+            }
+            throw error;
+          } finally {
+            runtime.adapter.clearLiveRenderer(
+              binding.conversationKey,
+              renderer,
+            );
+          }
+          return;
+        }
+
+        if (!isProjectTextChannel(message.channel, runtime)) {
+          return;
+        }
+
+        const thread = await message.startThread({
+          name: buildAutoThreadName(message),
+          autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+          reason: "picord auto-started session thread",
+        });
+        await thread.members.add(message.author.id).catch(() => undefined);
+
+        await thread.sendTyping().catch(() => undefined);
+
         const binding = runtime.bindThread(thread);
-
-        if (runtime.adapter.isStreaming(binding.conversationKey)) {
-          // Seal the current AI message so it stops editing,
-          // then abort — the user's Discord message appears between
-          // the sealed message and the AI's new follow-up.
-          // NOTE: we do NOT use steer() here because steer only queues a
-          // message for AFTER the current turn finishes — it does NOT
-          // interrupt the stream, so the AI would keep going without
-          // addressing the user's new input.
-          await runtime.adapter.sealLiveRenderer(binding.conversationKey);
-          // Fall through to abort + new respond below.
-        }
-
-        if ("sendTyping" in message.channel) {
-          await message.channel.sendTyping().catch(() => undefined);
-        }
-
         const runId = nextRunId(binding.conversationKey);
         await runtime.adapter.abort(binding.conversationKey).catch(() => false);
-        const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
-        runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer, runId);
+        const renderer = new LiveDiscordRunRenderer(
+          createChannelLiveMessageTarget(thread),
+        );
+        runtime.adapter.registerLiveRenderer(
+          binding.conversationKey,
+          renderer,
+          runId,
+        );
         try {
           const response = await runtime.adapter.respond({
             conversationKey: binding.conversationKey,
             workspaceKey: binding.workspaceKey,
             sessionName: binding.sessionName,
-            promptText: buildPromptFromMessage(message, promptText),
+            promptText: [
+              buildPromptFromMessage(message, promptText),
+              "",
+              `[Session thread context]`,
+              `ThreadId: ${thread.id}`,
+              `WorkspaceChannel: ${thread.parentId ?? "unknown"}`,
+            ].join("\n"),
             runId,
           });
           if (!isLatestRun(binding.conversationKey, runId)) {
@@ -205,58 +302,13 @@ export function registerDiscordPortBot({
         } finally {
           runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
         }
-        return;
-      }
-
-      if (!isProjectTextChannel(message.channel, runtime)) {
-        return;
-      }
-
-      const thread = await message.startThread({
-        name: buildAutoThreadName(message),
-        autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
-        reason: "picord auto-started session thread",
-      });
-      await thread.members.add(message.author.id).catch(() => undefined);
-
-      await thread.sendTyping().catch(() => undefined);
-
-      const binding = runtime.bindThread(thread);
-      const runId = nextRunId(binding.conversationKey);
-      await runtime.adapter.abort(binding.conversationKey).catch(() => false);
-      const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
-      runtime.adapter.registerLiveRenderer(binding.conversationKey, renderer, runId);
-      try {
-        const response = await runtime.adapter.respond({
-          conversationKey: binding.conversationKey,
-          workspaceKey: binding.workspaceKey,
-          sessionName: binding.sessionName,
-          promptText: [
-            buildPromptFromMessage(message, promptText),
-            "",
-            `[Session thread context]`,
-            `ThreadId: ${thread.id}`,
-            `WorkspaceChannel: ${thread.parentId ?? "unknown"}`,
-          ].join("\n"),
-          runId,
-        });
-        if (!isLatestRun(binding.conversationKey, runId)) {
-          return;
-        }
-        await renderer.finalize(response);
       } catch (error) {
-        if (!isLatestRun(binding.conversationKey, runId)) {
-          return;
-        }
-        throw error;
-      } finally {
-        runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
+        const text = error instanceof Error ? error.message : String(error);
+        onError?.(`discord-port message flow error: ${text}`);
+        await replyToMessage(message, `picord error: ${text}`).catch(
+          () => undefined,
+        );
       }
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      onError?.(`discord-port message flow error: ${text}`);
-      await replyToMessage(message, `picord error: ${text}`).catch(() => undefined);
-    }
     });
   }
 
@@ -266,7 +318,10 @@ export function registerDiscordPortBot({
 
   client.on(Events.Error, (error) => {
     const text = error instanceof Error ? error.message : String(error);
-    if (text.includes("Unknown interaction") || text.includes("Interaction has already been acknowledged")) {
+    if (
+      text.includes("Unknown interaction") ||
+      text.includes("Interaction has already been acknowledged")
+    ) {
       onWarning?.(`discord-port ignored stale interaction error: ${text}`);
       return;
     }
@@ -295,7 +350,8 @@ export async function startDiscordPortBot({
   onError?: (message: string) => void;
   multiAuthAccountManager?: AccountManager;
 }) {
-  const resolvedClient = client ?? createDiscordPortClient(enableMessageContent);
+  const resolvedClient =
+    client ?? createDiscordPortClient(enableMessageContent);
   const runtime = new DiscordPortRuntime(resolvedClient, adapter);
   registerDiscordPortBot({
     client: resolvedClient,

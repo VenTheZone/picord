@@ -19,7 +19,10 @@ import { canAccessDm, canAccessGuild } from "./auth.js";
 import { toDiscordChunks } from "./conversation.js";
 import { loadRuntimeConfig } from "./config.js";
 import discordPortExtension from "./discord-port/entrypoint.js";
-import { buildAllMultiAuthCommands, handleMultiAuthCommand } from "./discord-port/multi-auth-commands.js";
+import {
+  buildAllMultiAuthCommands,
+  handleMultiAuthCommand,
+} from "./discord-port/multi-auth-commands.js";
 import {
   AccountManager,
   registerGlobalKeyDistributor,
@@ -29,7 +32,12 @@ import {
   multiAuthDebugLogger,
 } from "./discord-port/multi-auth-integration.js";
 import { isEncryptionAvailable } from "./crypto/encryption.js";
-import { LiveDiscordRunRenderer, createChannelLiveMessageTarget, createInteractionLiveMessageTarget, type PiLiveUpdate } from "./live-discord-renderer.js";
+import {
+  LiveDiscordRunRenderer,
+  createChannelLiveMessageTarget,
+  createInteractionLiveMessageTarget,
+  type PiLiveUpdate,
+} from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 import { RuntimeLock } from "./runtime-lock.js";
@@ -68,7 +76,9 @@ const OWNER_ADMIN_COMMAND_NAMES = new Set([
 const PICORD_CATEGORY_NAME = "Picord";
 
 function truncateDescription(description: string): string {
-  return description.length <= 100 ? description : `${description.slice(0, 97)}...`;
+  return description.length <= 100
+    ? description
+    : `${description.slice(0, 97)}...`;
 }
 
 function buildAskCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
@@ -76,7 +86,10 @@ function buildAskCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
     .setName("ask")
     .setDescription("Ask pi in the current Discord session")
     .addStringOption((option) =>
-      option.setName("prompt").setDescription("Prompt to send to pi").setRequired(true),
+      option
+        .setName("prompt")
+        .setDescription("Prompt to send to pi")
+        .setRequired(true),
     )
     .toJSON();
 }
@@ -109,11 +122,17 @@ function buildResumeCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
 }
 
 function buildStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder().setName("status").setDescription("Show picord status").toJSON();
+  return new SlashCommandBuilder()
+    .setName("status")
+    .setDescription("Show picord status")
+    .toJSON();
 }
 
 function buildModelsCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder().setName("models").setDescription("List workspace models").toJSON();
+  return new SlashCommandBuilder()
+    .setName("models")
+    .setDescription("List workspace models")
+    .toJSON();
 }
 
 function buildScopeModelsCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
@@ -143,7 +162,10 @@ function buildUseModelCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody
 }
 
 function buildReloadCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
-  return new SlashCommandBuilder().setName("reload").setDescription("Reload picord runtime").toJSON();
+  return new SlashCommandBuilder()
+    .setName("reload")
+    .setDescription("Reload picord runtime")
+    .toJSON();
 }
 
 function buildProjectCreateCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
@@ -151,7 +173,12 @@ function buildProjectCreateCommand(): RESTPostAPIChatInputApplicationCommandsJSO
     .setName("project-create")
     .setDescription("Create a managed project channel and workspace mapping")
     .addStringOption((option) =>
-      option.setName("name").setDescription("Project name for the Discord channel and workspace folder").setRequired(true),
+      option
+        .setName("name")
+        .setDescription(
+          "Project name for the Discord channel and workspace folder",
+        )
+        .setRequired(true),
     )
     .toJSON();
 }
@@ -170,15 +197,24 @@ function buildAccessRequestsCommand(): RESTPostAPIChatInputApplicationCommandsJS
     .toJSON();
 }
 
-function buildSkillCommand(skill: SkillSummary): RESTPostAPIChatInputApplicationCommandsJSONBody | undefined {
+function buildSkillCommand(
+  skill: SkillSummary,
+): RESTPostAPIChatInputApplicationCommandsJSONBody | undefined {
   if (RESERVED_COMMAND_NAMES.has(skill.name)) return undefined;
   if (!/^[a-z0-9-]{1,32}$/.test(skill.name)) return undefined;
 
   return new SlashCommandBuilder()
     .setName(skill.name)
-    .setDescription(truncateDescription(skill.description || `Invoke the ${skill.name} skill`))
+    .setDescription(
+      truncateDescription(
+        skill.description || `Invoke the ${skill.name} skill`,
+      ),
+    )
     .addStringOption((option) =>
-      option.setName("prompt").setDescription("Optional arguments for the skill").setRequired(false),
+      option
+        .setName("prompt")
+        .setDescription("Optional arguments for the skill")
+        .setRequired(false),
     )
     .toJSON();
 }
@@ -202,7 +238,9 @@ async function buildSlashCommands(
     buildAccessRequestsCommand(),
   ];
 
-  const skillCommands = skills.map(buildSkillCommand).filter(Boolean) as RESTPostAPIChatInputApplicationCommandsJSONBody[];
+  const skillCommands = skills
+    .map(buildSkillCommand)
+    .filter(Boolean) as RESTPostAPIChatInputApplicationCommandsJSONBody[];
 
   return [
     ...baseCommands,
@@ -212,10 +250,14 @@ async function buildSlashCommands(
 }
 
 function isThreadChannelType(type: ChannelType | null | undefined): boolean {
-  return type === ChannelType.PublicThread || type === ChannelType.PrivateThread;
+  return (
+    type === ChannelType.PublicThread || type === ChannelType.PrivateThread
+  );
 }
 
-function isThreadLikeChannel(channel: { type?: ChannelType | null }): channel is {
+function isThreadLikeChannel(channel: {
+  type?: ChannelType | null;
+}): channel is {
   type: ChannelType.PublicThread | ChannelType.PrivateThread;
   id: string;
   name: string;
@@ -225,10 +267,14 @@ function isThreadLikeChannel(channel: { type?: ChannelType | null }): channel is
 }
 
 function getWorkspaceChannelIdFromMessage(message: Message): string {
-  return isThreadLikeChannel(message.channel) ? (message.channel.parentId ?? message.channelId) : message.channelId;
+  return isThreadLikeChannel(message.channel)
+    ? (message.channel.parentId ?? message.channelId)
+    : message.channelId;
 }
 
-function getWorkspaceChannelIdFromInteraction(interaction: ChatInputCommandInteraction): string {
+function getWorkspaceChannelIdFromInteraction(
+  interaction: ChatInputCommandInteraction,
+): string {
   return interaction.channel && isThreadLikeChannel(interaction.channel)
     ? (interaction.channel.parentId ?? interaction.channelId)
     : interaction.channelId;
@@ -241,7 +287,9 @@ function getWorkspaceKeyFromMessage(message: Message): string {
   return `discord:guild:${message.guildId}:workspace:${getWorkspaceChannelIdFromMessage(message)}`;
 }
 
-function getWorkspaceKeyFromInteraction(interaction: ChatInputCommandInteraction): string {
+function getWorkspaceKeyFromInteraction(
+  interaction: ChatInputCommandInteraction,
+): string {
   if (!interaction.guildId) {
     return `discord:dm:${interaction.channelId}`;
   }
@@ -258,7 +306,9 @@ function getConversationKeyFromMessage(message: Message): string {
   return `discord:guild:${message.guildId}:channel:${message.channelId}`;
 }
 
-function getConversationKeyFromInteraction(interaction: ChatInputCommandInteraction): string {
+function getConversationKeyFromInteraction(
+  interaction: ChatInputCommandInteraction,
+): string {
   if (!interaction.guildId) {
     return `discord:dm:${interaction.channelId}`;
   }
@@ -287,7 +337,9 @@ function buildAutoThreadName(sourceText: string): string {
   return base.slice(0, 80);
 }
 
-function getSessionNameFromInteraction(interaction: ChatInputCommandInteraction): string {
+function getSessionNameFromInteraction(
+  interaction: ChatInputCommandInteraction,
+): string {
   if (!interaction.guildId) {
     return `dm-${interaction.user.username}`;
   }
@@ -297,19 +349,34 @@ function getSessionNameFromInteraction(interaction: ChatInputCommandInteraction)
   return interaction.channelId;
 }
 
-function isProjectWorkspaceChannel(channelId: string, config: PicordRuntimeConfig): boolean {
-  return config.allowedChannelIds.includes(channelId) && channelId !== config.hostChannelId;
+function isProjectWorkspaceChannel(
+  channelId: string,
+  config: PicordRuntimeConfig,
+): boolean {
+  return (
+    config.allowedChannelIds.includes(channelId) &&
+    channelId !== config.hostChannelId
+  );
 }
 
-function extractMemberRoleIds(member: Message["member"] | ChatInputCommandInteraction["member"]): string[] {
+function extractMemberRoleIds(
+  member: Message["member"] | ChatInputCommandInteraction["member"],
+): string[] {
   if (!member) return [];
 
   if (member instanceof GuildMember) {
     return [...member.roles.cache.keys()];
   }
 
-  if (typeof member === "object" && member !== null && "roles" in member && Array.isArray(member.roles)) {
-    return member.roles.filter((roleId): roleId is string => typeof roleId === "string");
+  if (
+    typeof member === "object" &&
+    member !== null &&
+    "roles" in member &&
+    Array.isArray(member.roles)
+  ) {
+    return member.roles.filter(
+      (roleId): roleId is string => typeof roleId === "string",
+    );
   }
 
   return [];
@@ -319,7 +386,10 @@ function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-async function resolveAllowedRoleIds(config: PicordRuntimeConfig, guild: Guild | null): Promise<string[]> {
+async function resolveAllowedRoleIds(
+  config: PicordRuntimeConfig,
+  guild: Guild | null,
+): Promise<string[]> {
   const roleIds = [...config.allowedRoleIds];
   if (!guild || config.allowedRoleNames.length === 0) {
     return unique(roleIds);
@@ -374,14 +444,19 @@ function normalizeProjectSlug(rawName: string): string {
   return slug;
 }
 
-function resolveManagedWorkspaceRoot(config: PicordRuntimeConfig, projectSlug: string): string {
+function resolveManagedWorkspaceRoot(
+  config: PicordRuntimeConfig,
+  projectSlug: string,
+): string {
   return path.join(config.workspaceBasePath, projectSlug);
 }
 
 function ensureDirectoryExists(targetPath: string): void {
   if (existsSync(targetPath)) {
     if (!statSync(targetPath).isDirectory()) {
-      throw new Error(`Managed workspace path exists but is not a directory: ${targetPath}`);
+      throw new Error(
+        `Managed workspace path exists but is not a directory: ${targetPath}`,
+      );
     }
     return;
   }
@@ -392,7 +467,10 @@ function ensureDirectoryExists(targetPath: string): void {
 async function ensurePicordCategory(guild: Guild): Promise<string> {
   await guild.channels.fetch();
   const existing = guild.channels.cache.find((channel) => {
-    return channel.type === ChannelType.GuildCategory && channel.name.toLowerCase() === PICORD_CATEGORY_NAME.toLowerCase();
+    return (
+      channel.type === ChannelType.GuildCategory &&
+      channel.name.toLowerCase() === PICORD_CATEGORY_NAME.toLowerCase()
+    );
   });
   if (existing?.type === ChannelType.GuildCategory) {
     return existing.id;
@@ -406,7 +484,10 @@ async function ensurePicordCategory(guild: Guild): Promise<string> {
   return created.id;
 }
 
-async function ensureAllowedRolesExist(config: PicordRuntimeConfig, discordClient: Client): Promise<string[]> {
+async function ensureAllowedRolesExist(
+  config: PicordRuntimeConfig,
+  discordClient: Client,
+): Promise<string[]> {
   const created: string[] = [];
   if (config.allowedRoleNames.length === 0) return created;
 
@@ -453,9 +534,11 @@ async function findExistingManagedProjectChannel(
   }
 
   const fallback = guild.channels.cache.find((channel) => {
-    return channel.type === ChannelType.GuildText
-      && channel.name === channelName
-      && channel.topic === `picord workspace → ${workspaceRoot}`;
+    return (
+      channel.type === ChannelType.GuildText &&
+      channel.name === channelName &&
+      channel.topic === `picord workspace → ${workspaceRoot}`
+    );
   });
   if (fallback?.type === ChannelType.GuildText) {
     return { channelId: fallback.id, root: workspaceRoot, name: channelName };
@@ -466,15 +549,21 @@ async function findExistingManagedProjectChannel(
 
 function buildPromptFromMessage(message: Message, promptText: string): string {
   const attachments = [...message.attachments.values()]
-    .map((attachment) => `- ${attachment.name ?? "attachment"}: ${attachment.url}`)
+    .map(
+      (attachment) => `- ${attachment.name ?? "attachment"}: ${attachment.url}`,
+    )
     .join("\n");
 
   const contextLines = [
     "[Discord message]",
     `Author: ${message.author.tag} (${message.author.id})`,
-    message.guild ? `Guild: ${message.guild.name} (${message.guild.id})` : "Guild: DM",
+    message.guild
+      ? `Guild: ${message.guild.name} (${message.guild.id})`
+      : "Guild: DM",
     `Channel: ${message.channel.id}`,
-    isThreadLikeChannel(message.channel) ? `Thread: ${message.channel.name}` : undefined,
+    isThreadLikeChannel(message.channel)
+      ? `Thread: ${message.channel.name}`
+      : undefined,
     `Timestamp: ${message.createdAt.toISOString()}`,
     attachments ? `Attachments:\n${attachments}` : undefined,
     "",
@@ -484,11 +573,16 @@ function buildPromptFromMessage(message: Message, promptText: string): string {
   return contextLines.join("\n");
 }
 
-function buildPromptFromInteraction(interaction: ChatInputCommandInteraction, promptText: string): string {
+function buildPromptFromInteraction(
+  interaction: ChatInputCommandInteraction,
+  promptText: string,
+): string {
   const contextLines = [
     "[Discord slash command]",
     `Author: ${interaction.user.tag} (${interaction.user.id})`,
-    interaction.guild ? `Guild: ${interaction.guild.name} (${interaction.guild.id})` : "Guild: DM",
+    interaction.guild
+      ? `Guild: ${interaction.guild.name} (${interaction.guild.id})`
+      : "Guild: DM",
     `Channel: ${interaction.channelId}`,
     interaction.channel && isThreadLikeChannel(interaction.channel)
       ? `Thread: ${interaction.channel.name}`
@@ -502,7 +596,12 @@ function buildPromptFromInteraction(interaction: ChatInputCommandInteraction, pr
 }
 
 async function sendTextResponse(
-  channel: { send: (options: { content: string; allowedMentions: { parse: [] } }) => Promise<unknown> },
+  channel: {
+    send: (options: {
+      content: string;
+      allowedMentions: { parse: [] };
+    }) => Promise<unknown>;
+  },
   content: string,
 ): Promise<void> {
   const chunks = toDiscordChunks(content);
@@ -511,7 +610,10 @@ async function sendTextResponse(
   }
 }
 
-async function replyToMessage(message: Message, content: string): Promise<void> {
+async function replyToMessage(
+  message: Message,
+  content: string,
+): Promise<void> {
   const chunks = toDiscordChunks(content);
   const [firstChunk, ...remainingChunks] = chunks;
   if (!firstChunk) return;
@@ -523,7 +625,10 @@ async function replyToMessage(message: Message, content: string): Promise<void> 
 
   for (const chunk of remainingChunks) {
     if ("send" in message.channel) {
-      await message.channel.send({ content: chunk, allowedMentions: { parse: [] } });
+      await message.channel.send({
+        content: chunk,
+        allowedMentions: { parse: [] },
+      });
     }
   }
 }
@@ -576,23 +681,32 @@ function isHostControlChannel(
   config: PicordRuntimeConfig,
 ): boolean {
   if (!interaction.inGuild()) return false;
-  if (!interaction.channel || isThreadChannelType(interaction.channel.type)) return false;
+  if (!interaction.channel || isThreadChannelType(interaction.channel.type))
+    return false;
   if (config.hostChannelId) {
     return interaction.channelId === config.hostChannelId;
   }
-  return "name" in interaction.channel && typeof interaction.channel.name === "string"
+  return "name" in interaction.channel &&
+    typeof interaction.channel.name === "string"
     ? interaction.channel.name.toLowerCase() === config.hostChannelName
     : false;
 }
 
-function requireThreadForSessionCommand(interaction: ChatInputCommandInteraction): string | undefined {
+function requireThreadForSessionCommand(
+  interaction: ChatInputCommandInteraction,
+): string | undefined {
   if (!interaction.guildId) return undefined;
   if (isThreadChannelType(interaction.channel?.type)) return undefined;
   return "Use this command inside a Discord thread. Project channel = workspace, thread = pi session.";
 }
 
-function isSkillCommand(commandName: string, sessionPool: PiSessionPool): SkillSummary | undefined {
-  return sessionPool.getSkillSummaries().find((skill) => skill.name === commandName);
+function isSkillCommand(
+  commandName: string,
+  sessionPool: PiSessionPool,
+): SkillSummary | undefined {
+  return sessionPool
+    .getSkillSummaries()
+    .find((skill) => skill.name === commandName);
 }
 
 export default function picordExtension(pi: ExtensionAPI) {
@@ -614,20 +728,40 @@ export default function picordExtension(pi: ExtensionAPI) {
   let runtimeLock: RuntimeLock | undefined;
   let slashOnlyMode = false;
   let multiAuthAccountManager: AccountManager | undefined;
-  const liveRenderers = new Map<string, { renderer: LiveDiscordRunRenderer; runId?: number }>();
-  const conversationNoticeTargets = new Map<string, (content: string) => Promise<void>>();
+  const liveRenderers = new Map<
+    string,
+    { renderer: LiveDiscordRunRenderer; runId?: number }
+  >();
+  const conversationNoticeTargets = new Map<
+    string,
+    (content: string) => Promise<void>
+  >();
   const hostControlChannels = new Map<string, string>();
 
-  async function notifyConversation(conversationKey: string, runId: number | undefined, update: PiLiveUpdate): Promise<void> {
+  async function notifyConversation(
+    conversationKey: string,
+    runId: number | undefined,
+    update: PiLiveUpdate,
+  ): Promise<void> {
     const entry = liveRenderers.get(conversationKey);
     if (!entry) return;
-    if (entry.runId !== undefined && runId !== undefined && entry.runId !== runId) return;
+    if (
+      entry.runId !== undefined &&
+      runId !== undefined &&
+      entry.runId !== runId
+    )
+      return;
     await entry.renderer.onUpdate(update);
   }
 
-  async function notifyAccessRequest(conversationKey: string, content: string): Promise<void> {
+  async function notifyAccessRequest(
+    conversationKey: string,
+    content: string,
+  ): Promise<void> {
     const entry = liveRenderers.get(conversationKey);
-    const requestId = content.match(/Request ID:\s*(acc-\d+)/)?.[1] || content.match(/Access request\s+(acc-\d+)/)?.[1];
+    const requestId =
+      content.match(/Request ID:\s*(acc-\d+)/)?.[1] ||
+      content.match(/Access request\s+(acc-\d+)/)?.[1];
     if (entry) {
       await entry.renderer.showAccessRequest(content, requestId);
       return;
@@ -638,7 +772,9 @@ export default function picordExtension(pi: ExtensionAPI) {
     await target(content);
   }
 
-  async function resolveHostControlChannelId(guild: Guild): Promise<string | undefined> {
+  async function resolveHostControlChannelId(
+    guild: Guild,
+  ): Promise<string | undefined> {
     if (!config) return undefined;
     const currentConfig = config;
 
@@ -658,7 +794,10 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
 
     const byName = guild.channels.cache.find((channel) => {
-      return channel.type === ChannelType.GuildText && channel.name.toLowerCase() === currentConfig.hostChannelName;
+      return (
+        channel.type === ChannelType.GuildText &&
+        channel.name.toLowerCase() === currentConfig.hostChannelName
+      );
     });
     if (byName?.type === ChannelType.GuildText) {
       hostControlChannels.set(guild.id, byName.id);
@@ -668,53 +807,72 @@ export default function picordExtension(pi: ExtensionAPI) {
     return undefined;
   }
 
-  async function refreshHostControlChannels(discordClient: Client): Promise<string[]> {
+  async function refreshHostControlChannels(
+    discordClient: Client,
+  ): Promise<string[]> {
     if (!config) return [];
 
     const messages: string[] = [];
-    const guildIds = config.allowedGuildIds.length > 0
-      ? config.allowedGuildIds
-      : [...discordClient.guilds.cache.keys()];
+    const guildIds =
+      config.allowedGuildIds.length > 0
+        ? config.allowedGuildIds
+        : [...discordClient.guilds.cache.keys()];
 
     hostControlChannels.clear();
 
     for (const guildId of guildIds) {
-      const guild = await discordClient.guilds.fetch(guildId).catch(() => undefined);
+      const guild = await discordClient.guilds
+        .fetch(guildId)
+        .catch(() => undefined);
       if (!guild) continue;
 
       const hostChannelId = await resolveHostControlChannelId(guild);
       if (!hostChannelId) {
-        messages.push(`picord host control channel unresolved for ${guild.name}; expected #${config.hostChannelName}.`);
+        messages.push(
+          `picord host control channel unresolved for ${guild.name}; expected #${config.hostChannelName}.`,
+        );
         continue;
       }
 
       const hostChannel = guild.channels.cache.get(hostChannelId);
-      const hostLabel = hostChannel && "name" in hostChannel ? `#${hostChannel.name}` : hostChannelId;
-      messages.push(`picord host control channel for ${guild.name}: ${hostLabel}`);
+      const hostLabel =
+        hostChannel && "name" in hostChannel
+          ? `#${hostChannel.name}`
+          : hostChannelId;
+      messages.push(
+        `picord host control channel for ${guild.name}: ${hostLabel}`,
+      );
     }
 
     return messages;
   }
 
   async function registerCommandsIfEnabled(): Promise<void> {
-    if (!client?.application || !config?.registerCommands || !sessionPool) return;
+    if (!client?.application || !config?.registerCommands || !sessionPool)
+      return;
 
     let providerList: SupportedProviderId[] = [];
     if (multiAuthAccountManager) {
       try {
-        const allProviders = await multiAuthAccountManager.getSupportedProviders();
+        const allProviders =
+          await multiAuthAccountManager.getSupportedProviders();
         const excludeSet = new Set(config.multiAuth?.excludeProviders ?? []);
-        providerList = allProviders.filter(p => !excludeSet.has(p));
+        providerList = allProviders.filter((p) => !excludeSet.has(p));
       } catch {
         // ignore errors, proceed with empty list
       }
     }
 
-    const commands = await buildSlashCommands(sessionPool.getSkillSummaries(), providerList);
+    const commands = await buildSlashCommands(
+      sessionPool.getSkillSummaries(),
+      providerList,
+    );
 
     if (config.allowedGuildIds.length > 0) {
       await Promise.all(
-        config.allowedGuildIds.map((guildId) => client!.application!.commands.set(commands, guildId)),
+        config.allowedGuildIds.map((guildId) =>
+          client!.application!.commands.set(commands, guildId),
+        ),
       );
       return;
     }
@@ -728,8 +886,15 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     const isDm = !message.inGuild();
     const workspaceChannelId = getWorkspaceChannelIdFromMessage(message);
-    const resolvedHostChannelId = message.guild ? await resolveHostControlChannelId(message.guild) : undefined;
-    const effectiveConfig = await buildEffectiveConfig(config, sessionPool, message.guild ?? null, resolvedHostChannelId);
+    const resolvedHostChannelId = message.guild
+      ? await resolveHostControlChannelId(message.guild)
+      : undefined;
+    const effectiveConfig = await buildEffectiveConfig(
+      config,
+      sessionPool,
+      message.guild ?? null,
+      resolvedHostChannelId,
+    );
     const access = isDm
       ? canAccessDm(effectiveConfig, message.author.id)
       : canAccessGuild(effectiveConfig, {
@@ -740,7 +905,10 @@ export default function picordExtension(pi: ExtensionAPI) {
         });
 
     if (!access.allowed) {
-      await replyToMessage(message, access.reason ?? "You are not allowed to use this bot here.");
+      await replyToMessage(
+        message,
+        access.reason ?? "You are not allowed to use this bot here.",
+      );
       return;
     }
 
@@ -751,14 +919,13 @@ export default function picordExtension(pi: ExtensionAPI) {
       const conversationKey = getConversationKeyFromMessage(message);
 
       if (sessionPool.isStreaming(conversationKey)) {
-        // Seal the current AI message so it stops editing,
-        // then abort — the user's Discord message appears between
-        // the sealed message and the AI's new follow-up.
+        // Clear the renderer BEFORE abort so old subscription events
+        // are dropped, not routed to the new renderer.
         const currentEntry = liveRenderers.get(conversationKey);
         if (currentEntry) {
           await currentEntry.renderer.sealCurrentMessages();
         }
-        // Fall through to abort + new respond below.
+        liveRenderers.delete(conversationKey);
       }
 
       if ("sendTyping" in message.channel) {
@@ -766,7 +933,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
 
       await sessionPool.abort(conversationKey).catch(() => false);
-      const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
+      const renderer = new LiveDiscordRunRenderer(
+        createChannelLiveMessageTarget(message.channel as never),
+      );
       liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
@@ -797,14 +966,13 @@ export default function picordExtension(pi: ExtensionAPI) {
       const conversationKey = getConversationKeyFromMessage(message);
 
       if (sessionPool.isStreaming(conversationKey)) {
-        // Seal the current AI message so it stops editing,
-        // then abort — the user's Discord message appears between
-        // the sealed message and the AI's new follow-up.
+        // Clear the renderer BEFORE abort so old subscription events
+        // are dropped, not routed to the new renderer.
         const currentEntry = liveRenderers.get(conversationKey);
         if (currentEntry) {
           await currentEntry.renderer.sealCurrentMessages();
         }
-        // Fall through to abort + new respond below.
+        liveRenderers.delete(conversationKey);
       }
 
       if ("sendTyping" in message.channel) {
@@ -812,7 +980,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
 
       await sessionPool.abort(conversationKey).catch(() => false);
-      const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(message.channel as never));
+      const renderer = new LiveDiscordRunRenderer(
+        createChannelLiveMessageTarget(message.channel as never),
+      );
       liveRenderers.set(conversationKey, { renderer });
       conversationNoticeTargets.set(conversationKey, async (content) => {
         if ("send" in message.channel) {
@@ -854,7 +1024,9 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     const conversationKey = `discord:guild:${message.guildId!}:thread:${thread.id}`;
     const workspaceKey = getWorkspaceKeyFromMessage(message);
-    const renderer = new LiveDiscordRunRenderer(createChannelLiveMessageTarget(thread));
+    const renderer = new LiveDiscordRunRenderer(
+      createChannelLiveMessageTarget(thread),
+    );
     liveRenderers.set(conversationKey, { renderer });
     conversationNoticeTargets.set(conversationKey, async (content) => {
       await sendTextResponse(thread, content);
@@ -874,13 +1046,23 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
   }
 
-  async function handleInteraction(interaction: ChatInputCommandInteraction): Promise<void> {
+  async function handleInteraction(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
     if (!config || !sessionPool) return;
 
     const isDm = !interaction.inGuild();
-    const workspaceChannelId = getWorkspaceChannelIdFromInteraction(interaction);
-    const resolvedHostChannelId = interaction.guild ? await resolveHostControlChannelId(interaction.guild) : undefined;
-    const effectiveConfig = await buildEffectiveConfig(config, sessionPool, interaction.guild ?? null, resolvedHostChannelId);
+    const workspaceChannelId =
+      getWorkspaceChannelIdFromInteraction(interaction);
+    const resolvedHostChannelId = interaction.guild
+      ? await resolveHostControlChannelId(interaction.guild)
+      : undefined;
+    const effectiveConfig = await buildEffectiveConfig(
+      config,
+      sessionPool,
+      interaction.guild ?? null,
+      resolvedHostChannelId,
+    );
     const ephemeral = shouldUseEphemeral(interaction);
     const ownerAdminCommand = isOwnerAdminCommand(interaction.commandName);
 
@@ -914,7 +1096,10 @@ export default function picordExtension(pi: ExtensionAPI) {
           });
 
     if (!access.allowed) {
-      await interaction.reply({ content: access.reason ?? "Not allowed.", ephemeral });
+      await interaction.reply({
+        content: access.reason ?? "Not allowed.",
+        ephemeral,
+      });
       return;
     }
 
@@ -940,9 +1125,15 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     if (interaction.commandName === "models") {
       const scope = sessionPool.getWorkspaceModelScope(workspaceKey);
-      const models = scope.models.map((model) => `${model.provider}/${model.id}`).join("\n") || "No models available.";
+      const models =
+        scope.models
+          .map((model) => `${model.provider}/${model.id}`)
+          .join("\n") || "No models available.";
       await interaction.reply({
-        content: [`Workspace model scope: ${scope.patterns.join(", ") || "(none)"}`, models].join("\n\n"),
+        content: [
+          `Workspace model scope: ${scope.patterns.join(", ") || "(none)"}`,
+          models,
+        ].join("\n\n"),
         ephemeral,
       });
       return;
@@ -966,8 +1157,13 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
 
     if (interaction.commandName === "use-model") {
-      const modelReference = interaction.options.getString("model", true).trim();
-      const model = await sessionPool.setWorkspaceModel(workspaceKey, modelReference);
+      const modelReference = interaction.options
+        .getString("model", true)
+        .trim();
+      const model = await sessionPool.setWorkspaceModel(
+        workspaceKey,
+        modelReference,
+      );
       await interaction.reply({
         content: `Workspace model set to ${model.provider}/${model.id}`,
         ephemeral,
@@ -977,21 +1173,33 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     if (interaction.commandName === "reload") {
       if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can reload picord.", ephemeral: true });
+        await interaction.reply({
+          content: "Only the configured owner can reload picord.",
+          ephemeral: true,
+        });
         return;
       }
-      await interaction.reply({ content: "Reloading picord...", ephemeral: true });
+      await interaction.reply({
+        content: "Reloading picord...",
+        ephemeral: true,
+      });
       pi.sendUserMessage("/picord-reload", { deliverAs: "followUp" });
       return;
     }
 
     if (interaction.commandName === "project-create") {
       if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can create project channels.", ephemeral: true });
+        await interaction.reply({
+          content: "Only the configured owner can create project channels.",
+          ephemeral: true,
+        });
         return;
       }
       if (!interaction.guild) {
-        await interaction.reply({ content: "Use this command inside the target guild.", ephemeral: true });
+        await interaction.reply({
+          content: "Use this command inside the target guild.",
+          ephemeral: true,
+        });
         return;
       }
 
@@ -1007,7 +1215,11 @@ export default function picordExtension(pi: ExtensionAPI) {
         workspaceRoot,
       );
       if (existingWorkspace) {
-        await sessionPool.addManagedWorkspace(existingWorkspace.channelId, existingWorkspace.root, channelName);
+        await sessionPool.addManagedWorkspace(
+          existingWorkspace.channelId,
+          existingWorkspace.root,
+          channelName,
+        );
         await interaction.reply({
           content: `Project already exists: <#${existingWorkspace.channelId}> mapped to ${existingWorkspace.root}`,
           ephemeral: true,
@@ -1023,7 +1235,11 @@ export default function picordExtension(pi: ExtensionAPI) {
         topic: `picord workspace → ${workspaceRoot}`,
         reason: `picord managed project for ${channelName}`,
       });
-      const managedWorkspace = await sessionPool.addManagedWorkspace(createdChannel.id, workspaceRoot, channelName);
+      const managedWorkspace = await sessionPool.addManagedWorkspace(
+        createdChannel.id,
+        workspaceRoot,
+        channelName,
+      );
       await createdChannel.send({
         content: [
           `🚀 **Project initialized**`,
@@ -1043,14 +1259,23 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     if (interaction.commandName === "project-list") {
       if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can list managed projects.", ephemeral: true });
+        await interaction.reply({
+          content: "Only the configured owner can list managed projects.",
+          ephemeral: true,
+        });
         return;
       }
       const managed = sessionPool.listManagedWorkspaces();
       await interaction.reply({
-        content: managed.length > 0
-          ? managed.map((workspace) => `<#${workspace.channelId}> → ${workspace.root}`).join("\n")
-          : "No managed project channels yet.",
+        content:
+          managed.length > 0
+            ? managed
+                .map(
+                  (workspace) =>
+                    `<#${workspace.channelId}> → ${workspace.root}`,
+                )
+                .join("\n")
+            : "No managed project channels yet.",
         ephemeral: true,
       });
       return;
@@ -1058,14 +1283,20 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     if (interaction.commandName === "access-requests") {
       if (!sessionPool.isOwner(interaction.user.id)) {
-        await interaction.reply({ content: "Only the configured owner can inspect access requests.", ephemeral: true });
+        await interaction.reply({
+          content: "Only the configured owner can inspect access requests.",
+          ephemeral: true,
+        });
         return;
       }
       const pending = sessionPool.getPendingAccessRequests();
       await interaction.reply({
-        content: pending.length > 0
-          ? pending.map((request) => `${request.id} — ${request.summary}`).join("\n")
-          : "No pending access requests.",
+        content:
+          pending.length > 0
+            ? pending
+                .map((request) => `${request.id} — ${request.summary}`)
+                .join("\n")
+            : "No pending access requests.",
         ephemeral: true,
       });
       return;
@@ -1079,7 +1310,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
       const aborted = await sessionPool.abort(conversationKey);
       await interaction.reply({
-        content: aborted ? "Active run aborted. Send a new message or /ask in this thread to continue the same session." : "No active session to abort.",
+        content: aborted
+          ? "Active run aborted. Send a new message or /ask in this thread to continue the same session."
+          : "No active session to abort.",
         ephemeral,
       });
       return;
@@ -1092,7 +1325,9 @@ export default function picordExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const sessionReference = interaction.options.getString("session", true).trim();
+      const sessionReference = interaction.options
+        .getString("session", true)
+        .trim();
       const resumed = await sessionPool.resumeSession({
         conversationKey,
         workspaceKey,
@@ -1121,9 +1356,15 @@ export default function picordExtension(pi: ExtensionAPI) {
     }
 
     // Delegate multi-auth commands
-    if (interaction.commandName && interaction.commandName.startsWith("multi-auth")) {
+    if (
+      interaction.commandName &&
+      interaction.commandName.startsWith("multi-auth")
+    ) {
       if (!multiAuthAccountManager) {
-        await interaction.reply({ content: "Multi-auth credentials are not configured.", ephemeral });
+        await interaction.reply({
+          content: "Multi-auth credentials are not configured.",
+          ephemeral,
+        });
         return;
       }
       await handleMultiAuthCommand(interaction, multiAuthAccountManager);
@@ -1141,7 +1382,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       return;
     }
 
-    const renderer = new LiveDiscordRunRenderer(createInteractionLiveMessageTarget(interaction));
+    const renderer = new LiveDiscordRunRenderer(
+      createInteractionLiveMessageTarget(interaction),
+    );
     liveRenderers.set(conversationKey, { renderer });
     conversationNoticeTargets.set(conversationKey, async (content) => {
       const channel = interaction.channel;
@@ -1192,22 +1435,33 @@ export default function picordExtension(pi: ExtensionAPI) {
 
     config = loadRuntimeConfig(ctx.cwd);
     if (!config.isActive || !config.discordToken) {
-      ctx.ui.notify("picord inactive: set PICORD_DISCORD_TOKEN to enable Discord.", "info");
+      ctx.ui.notify(
+        "picord inactive: set PICORD_DISCORD_TOKEN to enable Discord.",
+        "info",
+      );
       return;
     }
 
     const runtimeConfig = config;
-    const lockResult = RuntimeLock.acquire(resolveRuntimeLockPath(runtimeConfig));
+    const lockResult = RuntimeLock.acquire(
+      resolveRuntimeLockPath(runtimeConfig),
+    );
     if (!lockResult.acquired) {
       ctx.ui.notify(`picord inactive: ${lockResult.reason}`, "warning");
       return;
     }
     runtimeLock = lockResult.lock;
 
-    const attachClientHandlers = (discordClient: Client, enableMessageContent: boolean) => {
+    const attachClientHandlers = (
+      discordClient: Client,
+      enableMessageContent: boolean,
+    ) => {
       discordClient.on(Events.Error, (error) => {
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("Unknown interaction") || message.includes("Interaction has already been acknowledged")) {
+        if (
+          message.includes("Unknown interaction") ||
+          message.includes("Interaction has already been acknowledged")
+        ) {
           return;
         }
         ctx.ui.notify(`picord discord client error: ${message}`, "error");
@@ -1215,11 +1469,17 @@ export default function picordExtension(pi: ExtensionAPI) {
 
       discordClient.once(Events.ClientReady, async () => {
         try {
-          const createdRoles = await ensureAllowedRolesExist(runtimeConfig, discordClient);
+          const createdRoles = await ensureAllowedRolesExist(
+            runtimeConfig,
+            discordClient,
+          );
           const hostMessages = await refreshHostControlChannels(discordClient);
           await registerCommandsIfEnabled();
           if (createdRoles.length > 0) {
-            ctx.ui.notify(`picord auto-created roles: ${createdRoles.join(", ")}`, "info");
+            ctx.ui.notify(
+              `picord auto-created roles: ${createdRoles.join(", ")}`,
+              "info",
+            );
           }
           for (const hostMessage of hostMessages) {
             ctx.ui.notify(
@@ -1228,11 +1488,19 @@ export default function picordExtension(pi: ExtensionAPI) {
             );
           }
         } catch (error) {
-          ctx.ui.notify(`picord command registration failed: ${String(error)}`, "error");
+          ctx.ui.notify(
+            `picord command registration failed: ${String(error)}`,
+            "error",
+          );
         }
 
-        const modeLabel = enableMessageContent ? "full mode" : "slash-only mode";
-        ctx.ui.notify(`picord connected as ${discordClient.user?.tag ?? "Discord bot"} (${modeLabel})`, "info");
+        const modeLabel = enableMessageContent
+          ? "full mode"
+          : "slash-only mode";
+        ctx.ui.notify(
+          `picord connected as ${discordClient.user?.tag ?? "Discord bot"} (${modeLabel})`,
+          "info",
+        );
         if ((event as { reason?: string }).reason === "reload") {
           ctx.ui.notify("picord reload complete.", "info");
         }
@@ -1245,7 +1513,10 @@ export default function picordExtension(pi: ExtensionAPI) {
           } catch (error) {
             const channel = message.channel;
             if (channel && "send" in channel) {
-              await sendTextResponse(channel, `picord error: ${error instanceof Error ? error.message : String(error)}`);
+              await sendTextResponse(
+                channel,
+                `picord error: ${error instanceof Error ? error.message : String(error)}`,
+              );
             }
           }
         });
@@ -1257,10 +1528,11 @@ export default function picordExtension(pi: ExtensionAPI) {
         try {
           await handleInteraction(interaction);
         } catch (error) {
-          const messageText = error instanceof Error ? error.message : String(error);
+          const messageText =
+            error instanceof Error ? error.message : String(error);
           if (
-            messageText.includes("Unknown interaction")
-            || messageText.includes("Interaction has already been acknowledged")
+            messageText.includes("Unknown interaction") ||
+            messageText.includes("Interaction has already been acknowledged")
           ) {
             return;
           }
@@ -1270,24 +1542,29 @@ export default function picordExtension(pi: ExtensionAPI) {
       });
     };
 
-    const createDiscordClient = (enableMessageContent: boolean) => new Client({
-      intents: enableMessageContent
-        ? [
-            GatewayIntentBits.Guilds,
-            GatewayIntentBits.GuildMessages,
-            GatewayIntentBits.DirectMessages,
-            GatewayIntentBits.MessageContent,
-          ]
-        : [
-            GatewayIntentBits.Guilds,
-            GatewayIntentBits.GuildMessages,
-            GatewayIntentBits.DirectMessages,
-          ],
-      partials: [Partials.Channel],
-    });
+    const createDiscordClient = (enableMessageContent: boolean) =>
+      new Client({
+        intents: enableMessageContent
+          ? [
+              GatewayIntentBits.Guilds,
+              GatewayIntentBits.GuildMessages,
+              GatewayIntentBits.DirectMessages,
+              GatewayIntentBits.MessageContent,
+            ]
+          : [
+              GatewayIntentBits.Guilds,
+              GatewayIntentBits.GuildMessages,
+              GatewayIntentBits.DirectMessages,
+            ],
+        partials: [Partials.Channel],
+      });
 
     try {
-      sessionPool = new PiSessionPool(runtimeConfig, notifyAccessRequest, notifyConversation);
+      sessionPool = new PiSessionPool(
+        runtimeConfig,
+        notifyAccessRequest,
+        notifyConversation,
+      );
       await sessionPool.initialize();
 
       // Initialize multi-auth: wrap API providers with credential rotation
@@ -1295,7 +1572,8 @@ export default function picordExtension(pi: ExtensionAPI) {
       initMultiAuthConfig(runtimeConfig.statePath, stateDir);
 
       if (config.multiAuth?.enabled !== false) {
-        const { buildMultiAuthExtensionConfig } = await import("./multi-auth/picord-config-adapter.js");
+        const { buildMultiAuthExtensionConfig } =
+          await import("./multi-auth/picord-config-adapter.js");
         const maConfig = buildMultiAuthExtensionConfig(config.multiAuth ?? {});
 
         multiAuthAccountManager = new AccountManager(
@@ -1314,14 +1592,22 @@ export default function picordExtension(pi: ExtensionAPI) {
           excludeProviders: maConfig.excludeProviders,
           streamTimeouts: maConfig.streamTimeouts,
         }).catch((err) => {
-          ctx.ui.notify(`multi-auth provider registration warning: ${err.message}`, "warning");
+          ctx.ui.notify(
+            `multi-auth provider registration warning: ${err.message}`,
+            "warning",
+          );
         });
 
         // Warm up: auto-activate preferred credentials
         await multiAuthAccountManager.ensureInitialized();
-        await multiAuthAccountManager.autoActivatePreferredCredentials({ avoidUsageApi: true }).catch((err) => {
-          ctx.ui.notify(`multi-auth warmup warning: ${err.message}`, "warning");
-        });
+        await multiAuthAccountManager
+          .autoActivatePreferredCredentials({ avoidUsageApi: true })
+          .catch((err) => {
+            ctx.ui.notify(
+              `multi-auth warmup warning: ${err.message}`,
+              "warning",
+            );
+          });
         if (maConfig.debug) {
           multiAuthDebugLogger.initialize(true);
         }
@@ -1330,7 +1616,10 @@ export default function picordExtension(pi: ExtensionAPI) {
       }
 
       if (!isEncryptionAvailable()) {
-        ctx.ui.notify("⚠️ PICORD_ENCRYPTION_KEY not set. Credentials stored in plaintext.", "warning");
+        ctx.ui.notify(
+          "⚠️ PICORD_ENCRYPTION_KEY not set. Credentials stored in plaintext.",
+          "warning",
+        );
       }
 
       client = createDiscordClient(true);
@@ -1345,7 +1634,10 @@ export default function picordExtension(pi: ExtensionAPI) {
           throw error;
         }
 
-        ctx.ui.notify("Discord Message Content intent is unavailable; falling back to slash-only mode.", "warning");
+        ctx.ui.notify(
+          "Discord Message Content intent is unavailable; falling back to slash-only mode.",
+          "warning",
+        );
         try {
           await client.destroy();
         } catch {}
@@ -1369,7 +1661,9 @@ export default function picordExtension(pi: ExtensionAPI) {
       hostControlChannels.clear();
       conversationNoticeTargets.clear();
       if (multiAuthAccountManager) {
-        unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
+        unregisterGlobalKeyDistributor(
+          multiAuthAccountManager.getKeyDistributor(),
+        );
         multiAuthAccountManager.shutdown();
         multiAuthAccountManager = undefined;
       }
@@ -1396,7 +1690,9 @@ export default function picordExtension(pi: ExtensionAPI) {
     liveRenderers.clear();
     conversationNoticeTargets.clear();
     if (multiAuthAccountManager) {
-      unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
+      unregisterGlobalKeyDistributor(
+        multiAuthAccountManager.getKeyDistributor(),
+      );
       multiAuthAccountManager.shutdown();
       multiAuthAccountManager = undefined;
     }
