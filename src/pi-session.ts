@@ -539,8 +539,31 @@ export class PiSessionPool {
     if (handle.session.isBashRunning) {
       handle.session.abortBash();
     }
-    await handle.session.abort();
-    return true;
+    // Wrap abort() in a race with a timeout. If the agent's waitForIdle()
+    // hangs (e.g. LLM provider doesn't respect the abort signal), we must
+    // force-unwind the runExclusive queue so the conversation doesn't
+    // permanently die. Without this, a single hung abort() can deadlock all
+    // future messages for this conversation forever.
+    const ABORT_TIMEOUT_MS = 5000;
+    let aborted = false;
+    try {
+      await Promise.race([
+        handle.session.abort(),
+        new Promise<void>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("abort timeout")),
+            ABORT_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+      aborted = true;
+    } catch {
+      // abort() timed out. Force-unwind the queue so new responds can start.
+      // The old respond() is orphaned but the agent is in a bad state anyway.
+      this.queues.delete(conversationKey);
+      aborted = true;
+    }
+    return aborted;
   }
 
   isStreaming(conversationKey: string): boolean {
