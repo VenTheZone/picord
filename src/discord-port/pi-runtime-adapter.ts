@@ -266,6 +266,7 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
 
   private async withRetry<T>(operation: () => Promise<T>, operationName: string, maxRetries = 2): Promise<T> {
     let lastError: Error | undefined;
+    const transientErrors: string[] = [];
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await operation();
@@ -274,13 +275,22 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
         lastError = error instanceof Error ? error : new Error(message);
         const isTransient = /rate.limit|timeout|ECONNRESET|ETIMEDOUT|network/i.test(message);
         if (isTransient && attempt < maxRetries) {
+          transientErrors.push(message.slice(0, 100));
           await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           continue;
+        }
+        // Non-transient error - throw immediately with summary if we had transient failures
+        if (transientErrors.length > 0) {
+          throw new Error(`${operationName} failed after ${transientErrors.length} retries: ${message.slice(0, 200)}`);
         }
         throw lastError;
       }
     }
-    throw lastError ?? new Error(`${operationName} failed after ${maxRetries} retries`);
+    // All retries exhausted
+    const summary = transientErrors.length > 0
+      ? `${operationName} failed after ${maxRetries} retries. Last: ${transientErrors[transientErrors.length - 1]}`
+      : `${operationName} failed after ${maxRetries} retries`;
+    throw new Error(summary);
   }
 
   respond(options: {

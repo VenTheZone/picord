@@ -32,6 +32,25 @@ function truncateErrorMessage(text: string): string {
     }
     return `Provider Error: Rate limited. Please wait and try again.`;
   }
+
+  // Collapse repeated "Last retryable error" spam from multi-auth retries
+  // Pattern: "...failed. Last retryable error: X failed. Last retryable error: Y failed..."
+  if (/Last retryable error|multi-auth rotation failed/i.test(text)) {
+    // Extract just the first occurrence of the actual error
+    const firstErrorMatch = text.match(/Last retryable error:\s*([^:]+?)(?=\.|$|\s+Last retryable error)/i);
+    if (firstErrorMatch) {
+      const errorPart = firstErrorMatch[1].trim();
+      // Count how many times "Last retryable error" appears
+      const retryCount = (text.match(/Last retryable error/gi) || []).length;
+      return `Provider Error: ${errorPart.slice(0, 150)}${retryCount > 1 ? ` (after ${retryCount} retries)` : ""}`;
+    }
+    // Fallback: extract provider name if present
+    const providerMatch = text.match(/failed for ([\w-]+):/i);
+    if (providerMatch) {
+      return `Provider Error: Authentication failed for ${providerMatch[1]}`;
+    }
+  }
+
   // Truncate long error messages
   if (text.length > 500) {
     return `${text.slice(0, 497)}...`;
