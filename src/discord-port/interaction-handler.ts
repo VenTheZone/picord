@@ -36,6 +36,7 @@ import {
   replyToInteraction,
 } from "./message-helpers.js";
 import { handleMultiAuthCommand } from "./multi-auth-commands.js";
+import { truncateErrorMessage } from "./discord-bot.js";
 import type { AccountManager } from "./multi-auth-integration.js";
 import type { DiscordPortRuntime } from "./runtime.js";
 
@@ -767,7 +768,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -878,7 +880,8 @@ export function registerDiscordPortInteractionHandler({
           );
         await interaction.showModal(modal);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -930,7 +933,8 @@ export function registerDiscordPortInteractionHandler({
           components: [buttons],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -987,7 +991,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1025,7 +1030,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1062,7 +1068,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1119,7 +1126,8 @@ export function registerDiscordPortInteractionHandler({
           ],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1177,7 +1185,8 @@ export function registerDiscordPortInteractionHandler({
           );
         await interaction.showModal(modal);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1228,7 +1237,8 @@ export function registerDiscordPortInteractionHandler({
           );
         await interaction.showModal(modal);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1261,7 +1271,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1294,7 +1305,8 @@ export function registerDiscordPortInteractionHandler({
           components: [],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -1409,7 +1421,8 @@ export function registerDiscordPortInteractionHandler({
           return;
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
         if (interaction.deferred || interaction.replied) {
           await interaction
             .followUp({ content: message, flags: MessageFlags.Ephemeral })
@@ -2368,7 +2381,8 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const rawMessage = error instanceof Error ? error.message : String(error);
+        const message = truncateErrorMessage(rawMessage);
       if (interaction.deferred || interaction.replied) {
         await interaction
           .followUp({ content: message, flags: MessageFlags.Ephemeral })

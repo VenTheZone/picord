@@ -21,41 +21,27 @@ import type { AccountManager } from "./multi-auth-integration.js";
 
 /**
  * Truncate error messages for display, especially rate limit errors.
+ * By default, shows compact 1-line summary. Verbose mode shows full error.
  */
-function truncateErrorMessage(text: string): string {
-  // Check for rate limit / quota errors
-  if (/\b429\b/i.test(text) || /rate.limit|quota.exceeded|too.many.requests/i.test(text)) {
-    // Extract the core error message for 429s
-    const match = text.match(/429[^\n]*/i) || text.match(/rate.limit[^\n]*/i) || text.match(/Too many[^\n]*/i);
-    if (match) {
-      return `Provider Error: ${match[0].slice(0, 200)}`;
-    }
-    return `Provider Error: Rate limited. Please wait and try again.`;
+export function truncateErrorMessage(text: string, verbose = false): string {
+  if (verbose) {
+    return text.length > 1900 ? `${text.slice(0, 1897)}...` : text;
   }
 
-  // Collapse repeated "Last retryable error" spam from multi-auth retries
-  // Pattern: "...failed. Last retryable error: X failed. Last retryable error: Y failed..."
-  if (/Last retryable error|multi-auth rotation failed/i.test(text)) {
-    // Extract just the first occurrence of the actual error
-    const firstErrorMatch = text.match(/Last retryable error:\s*([^:]+?)(?=\.|$|\s+Last retryable error)/i);
-    if (firstErrorMatch) {
-      const errorPart = firstErrorMatch[1].trim();
-      // Count how many times "Last retryable error" appears
-      const retryCount = (text.match(/Last retryable error/gi) || []).length;
-      return `Provider Error: ${errorPart.slice(0, 150)}${retryCount > 1 ? ` (after ${retryCount} retries)` : ""}`;
-    }
-    // Fallback: extract provider name if present
-    const providerMatch = text.match(/failed for ([\w-]+):/i);
-    if (providerMatch) {
-      return `Provider Error: Authentication failed for ${providerMatch[1]}`;
-    }
+  // Rate limit errors - ultra compact
+  if (/\b429\b/i.test(text) || /rate.limit|quota.exceeded/i.test(text)) {
+    return "Provider Error: Rate limited.";
   }
 
-  // Truncate long error messages
-  if (text.length > 500) {
-    return `${text.slice(0, 497)}...`;
+  // Multi-auth errors - extract provider name only
+  if (/multi-auth rotation/i.test(text)) {
+    const m = text.match(/failed for ([\w-]+):/i);
+    return m ? `Provider Error: ${m[1]} auth failed.` : "Provider Error: Auth failed.";
   }
-  return text;
+
+  // Default: first sentence only, max 150 chars
+  const sentence = (text.split(/[.\n]/)[0] || "").trim().replace(/\s+/g, " ");
+  return sentence.length > 150 ? sentence.slice(0, 147) + "..." : sentence;
 }
 
 function isThreadChannel(channel: Message["channel"]): boolean {
