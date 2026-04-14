@@ -9,7 +9,7 @@ import { sendTextResponse } from "./message-helpers.js";
 import { PiSessionPoolAdapter } from "./pi-runtime-adapter.js";
 import { buildDiscordPortCommands } from "./command-registration.js";
 import { buildAllMultiAuthCommands } from "./multi-auth-commands.js";
-import { createDiscordPortClient, startDiscordPortBot } from "./discord-bot.js";
+import { createDiscordPortClient, startDiscordPortBot, truncateErrorMessage } from "./discord-bot.js";
 import {
   AccountManager,
   registerMultiAuthProviders,
@@ -130,13 +130,15 @@ export async function startDiscordPortExtensionRuntime({
 }): Promise<DiscordPortBridgeHandle> {
   // Guard against unhandled rejections crashing the process
   const rejectionHandler = (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    notify(`discord-port unhandled rejection: ${message}`, "error");
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const message = truncateErrorMessage(rawMessage);
+    notify(`unhandled: ${message}`, "error");
   };
   process.on("unhandledRejection", rejectionHandler);
 
   const exceptionHandler = (error: Error) => {
-    notify(`discord-port uncaught exception: ${error.message}\n${error.stack ?? ""}`, "error");
+    const message = truncateErrorMessage(error.message);
+    notify(`exception: ${message}`, "error");
   };
   process.on("uncaughtException", exceptionHandler);
 
@@ -246,7 +248,7 @@ export async function startDiscordPortExtensionRuntime({
         unregisterGlobalKeyDistributor(multiAuthAccountManager.getKeyDistributor());
         multiAuthAccountManager.shutdown();
       } catch (err) {
-        notify(`multi-auth shutdown warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+        notify(`multi-auth shutdown: ${truncateErrorMessage(err instanceof Error ? err.message : String(err))}`, "warning");
       }
       multiAuthAccountManager = undefined;
     }
@@ -276,11 +278,11 @@ export async function startDiscordPortExtensionRuntime({
               },
             });
           } catch (err) {
-            notify(`multi-auth provider registration warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+            notify(`multi-auth registration: ${truncateErrorMessage(err instanceof Error ? err.message : String(err))}`, "warning");
           }
           await multiAuthAccountManager.ensureInitialized();
           await multiAuthAccountManager.autoActivatePreferredCredentials({ avoidUsageApi: true }).catch((err) => {
-            notify(`multi-auth warmup warning: ${err.message}`, "warning");
+            notify(`multi-auth warmup: ${truncateErrorMessage(err.message)}`, "warning");
           });
           multiAuthDebugLogger.initialize(true);
           notify("multi-auth credentials loaded.", "info");
@@ -310,11 +312,11 @@ export async function startDiscordPortExtensionRuntime({
             );
             clearRestartNotification(config.statePath);
           } catch (error) {
-            notify(`discord-port could not deliver restart notification: ${error instanceof Error ? error.message : String(error)}`, "warning");
+            notify(`restart notification failed: ${truncateErrorMessage(error instanceof Error ? error.message : String(error))}`, "warning");
           }
         }
       } catch (error) {
-        notify(`discord-port command registration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        notify(`command registration failed: ${truncateErrorMessage(error instanceof Error ? error.message : String(error))}`, "error");
       }
       notify(
         `discord-port connected as ${createdClient.user?.tag ?? "Discord bot"} (${enableMessageContent ? "full mode" : "slash-only mode"})`,

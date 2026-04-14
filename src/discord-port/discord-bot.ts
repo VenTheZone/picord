@@ -39,6 +39,14 @@ export function truncateErrorMessage(text: string, verbose = false): string {
     return m ? `Provider Error: ${m[1]} auth failed.` : "Provider Error: Auth failed.";
   }
 
+  // Discord API errors - hide technical noise
+  if (/Unknown Message/i.test(text)) {
+    return "Message was deleted or unavailable.";
+  }
+  if (/Unknown Interaction|Interaction has already been acknowledged/i.test(text)) {
+    return "Interaction expired. Please retry the command.";
+  }
+
   // Default: first sentence only, max 150 chars
   const sentence = (text.split(/[.\n]/)[0] || "").trim().replace(/\s+/g, " ");
   return sentence.length > 150 ? sentence.slice(0, 147) + "..." : sentence;
