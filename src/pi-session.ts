@@ -1227,15 +1227,19 @@ export class PiSessionPool {
 
     const settingsManager = SettingsManager.create(root);
     const picordSkillsPath = path.join(getPicordPackageRoot(), "skills");
+ const globalPiExtensionsPath = path.join(homedir(), ".pi", "extensions");
     const resourceLoader = new DefaultResourceLoader({
       cwd: root,
       settingsManager,
       noThemes: true,
       appendSystemPrompt: buildSystemPrompt(this.config),
       extensionsOverride: (base) => filterOutPicordExtensions(base),
-      additionalSkillPaths: [picordSkillsPath],
+      additionalSkillPaths: [picordSkillsPath, globalPiExtensionsPath],
     });
-    await resourceLoader.reload();
+    await resourceLoader.reload().catch((err) => {
+    console.error(`[picord] Extension load failed:`, err);
+    throw err;
+    });
 
     const state: WorkspaceState = {
       cwd: root,
