@@ -199,7 +199,7 @@ export async function startDiscordPortExtensionRuntime({
   await sessionPool.initialize();
   const adapter = new PiSessionPoolAdapter(config, sessionPool, liveRenderers);
 
-  let slashOnlyMode = false;
+  let _slashOnlyMode = false;
   let cleanedUp = false;
   let multiAuthAccountManager: AccountManager | undefined;
 
@@ -346,7 +346,7 @@ export async function startDiscordPortExtensionRuntime({
       throw error;
     }
 
-    slashOnlyMode = true;
+    _slashOnlyMode = true;
     notify("discord-port Message Content intent unavailable; falling back to slash-only mode.", "warning");
     if (client) {
       await client.destroy().catch(() => undefined);

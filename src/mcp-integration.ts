@@ -53,7 +53,6 @@ export interface MCPWrappedTool {
   tool: ToolDefinition;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MCPClient = {
   connect(transport: MCPTransport): Promise<void>;
   listTools(): Promise<{ tools: MCPTool[] }>;
@@ -80,12 +79,18 @@ type MCPTransport = unknown;
 /**
  * Check if MCP SDK is available.
  */
-export function isMCPSupported(): boolean {
+export async function isMCPSupported(): Promise<boolean> {
   if (mcpSdkModule !== undefined) return mcpSdkModule !== null;
   try {
-    mcpSdkModule = require("@modelcontextprotocol/sdk/client/index.js") as MCPModule;
-    mcpStdioModule = require("@modelcontextprotocol/sdk/client/stdio.js") as MCPStdioModule;
-    mcpSseModule = require("@modelcontextprotocol/sdk/client/sse.js") as MCPSseModule;
+    // @ts-expect-error MCP SDK may not be installed (optional dependency)
+    const sdkMod = await import("@modelcontextprotocol/sdk/client/index.js") as unknown;
+    // @ts-expect-error MCP SDK may not be installed (optional dependency)
+    const stdioMod = await import("@modelcontextprotocol/sdk/client/stdio.js") as unknown;
+    // @ts-expect-error MCP SDK may not be installed (optional dependency)
+    const sseMod = await import("@modelcontextprotocol/sdk/client/sse.js") as unknown;
+    mcpSdkModule = sdkMod as MCPModule;
+    mcpStdioModule = stdioMod as MCPStdioModule;
+    mcpSseModule = sseMod as MCPSseModule;
     return true;
   } catch {
     mcpSdkModule = null;
@@ -263,7 +268,7 @@ const activeMCPConnections: { serverId: string; client: MCPClient }[] = [];
 export async function loadMCPTools(): Promise<{
   tools: MCPWrappedTool[];
 }> {
-  if (!isMCPSupported()) {
+  if (!(await isMCPSupported())) {
     return { tools: [] };
   }
 
