@@ -51,7 +51,7 @@ function createRuntimeStub() {
   const adapter = {
     config: { hostChannelName: "host" },
     isManagedProjectChannel: vi.fn(
-      (channelId: string) => channelId === "project-1",
+      (channelId: string) => channelId === "project-1" || channelId.startsWith("thread-"),
     ),
     registerLiveRenderer: vi.fn(),
     sealLiveRenderer: vi.fn(async () => undefined),
@@ -64,6 +64,7 @@ function createRuntimeStub() {
     steer: vi.fn(async () => true),
     waitForRespondDone: vi.fn(async () => undefined),
     isStreaming: vi.fn(() => false),
+    getThinkingVisibility: vi.fn(() => true),
   };
 
   return {
