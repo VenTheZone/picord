@@ -223,6 +223,10 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     return this.sessionPool.steer(conversationKey, text);
   }
 
+  waitForRespondDone(conversationKey: string): Promise<void> {
+    return this.sessionPool.waitForRespondDone(conversationKey);
+  }
+
   reset(conversationKey: string): Promise<boolean> {
     return this.sessionPool.reset(conversationKey);
   }
@@ -260,6 +264,25 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     };
   }
 
+  private async withRetry<T>(operation: () => Promise<T>, operationName: string, maxRetries = 2): Promise<T> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        lastError = error instanceof Error ? error : new Error(message);
+        const isTransient = /rate.limit|timeout|ECONNRESET|ETIMEDOUT|network/i.test(message);
+        if (isTransient && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+        throw lastError;
+      }
+    }
+    throw lastError ?? new Error(`${operationName} failed after ${maxRetries} retries`);
+  }
+
   respond(options: {
     conversationKey: string;
     workspaceKey: string;
@@ -267,7 +290,13 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     promptText: string;
     runId?: number;
   }): Promise<string> {
-    return this.sessionPool.respond(options);
+    return this.withRetry(
+      () => this.sessionPool.respond(options),
+      "respond"
+    ).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`respond failed: ${message}`);
+    });
   }
 
   invokeSkill(options: {
@@ -278,6 +307,12 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
     args?: string;
     runId?: number;
   }): Promise<string> {
-    return this.sessionPool.invokeSkill(options);
+    return this.withRetry(
+      () => this.sessionPool.invokeSkill(options),
+      "invokeSkill"
+    ).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`invokeSkill failed: ${message}`);
+    });
   }
 }

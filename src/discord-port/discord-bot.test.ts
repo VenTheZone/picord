@@ -61,6 +61,8 @@ function createRuntimeStub() {
         `response:${promptText}`,
     ),
     abort: vi.fn(async () => true),
+    steer: vi.fn(async () => true),
+    waitForRespondDone: vi.fn(async () => undefined),
     isStreaming: vi.fn(() => false),
   };
 
@@ -112,9 +114,6 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.abort).toHaveBeenCalledWith(
-      "discord:guild:guild-1:thread:thread-1",
-    );
     expect(runtime.adapter.registerLiveRenderer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
       expect.anything(),
@@ -154,7 +153,6 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:dm:dm-1");
     expect(runtime.adapter.registerLiveRenderer).toHaveBeenCalledWith(
       "discord:dm:dm-1",
       expect.anything(),
@@ -168,7 +166,7 @@ describe("discord-bot message flow", () => {
     );
   });
 
-  it("seals and aborts when the session is already streaming", async () => {
+  it("aborts and re-responds when the session is already streaming", async () => {
     const client = createClientStub();
     const runtime = createRuntimeStub();
     runtime.adapter.isStreaming.mockReturnValue(true);
@@ -199,7 +197,7 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    // During interrupt: seal → clear → abort → new respond
+    // When streaming: seal → clear → abort → wait for old respond → new respond
     expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
     );
@@ -207,6 +205,9 @@ describe("discord-bot message flow", () => {
       "discord:guild:guild-1:thread:thread-1",
     );
     expect(runtime.adapter.abort).toHaveBeenCalledWith(
+      "discord:guild:guild-1:thread:thread-1",
+    );
+    expect(runtime.adapter.waitForRespondDone).toHaveBeenCalledWith(
       "discord:guild:guild-1:thread:thread-1",
     );
     expect(runtime.adapter.respond).toHaveBeenCalledWith(
@@ -217,7 +218,7 @@ describe("discord-bot message flow", () => {
     );
   });
 
-  it("aborts and responds when the session is streaming in a DM", async () => {
+  it("aborts and re-responds when the DM session is already streaming", async () => {
     const client = createClientStub();
     const runtime = createRuntimeStub();
     runtime.adapter.isStreaming.mockReturnValue(true);
@@ -244,6 +245,7 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
+    // When streaming: seal → clear → abort → wait for old respond → new respond
     expect(runtime.adapter.sealLiveRenderer).toHaveBeenCalledWith(
       "discord:dm:dm-1",
     );
@@ -251,6 +253,9 @@ describe("discord-bot message flow", () => {
       "discord:dm:dm-1",
     );
     expect(runtime.adapter.abort).toHaveBeenCalledWith("discord:dm:dm-1");
+    expect(runtime.adapter.waitForRespondDone).toHaveBeenCalledWith(
+      "discord:dm:dm-1",
+    );
     expect(runtime.adapter.respond).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationKey: "discord:dm:dm-1",
@@ -304,9 +309,6 @@ describe("discord-bot message flow", () => {
 
     await client.__emit(Events.MessageCreate, message);
 
-    expect(runtime.adapter.abort).toHaveBeenCalledWith(
-      "discord:guild:guild-1:thread:thread-2",
-    );
     expect(runtime.adapter.respond).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationKey: "discord:guild:guild-1:thread:thread-2",

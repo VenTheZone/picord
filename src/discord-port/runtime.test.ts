@@ -89,6 +89,7 @@ function createAdapter(overrides: Partial<DiscordPortRuntimeAdapter> = {}): Disc
     abort: async () => false,
     isStreaming: () => false,
     steer: async () => true,
+    waitForRespondDone: async () => undefined,
     reset: async () => false,
     resumeSession: async () => ({ id: "session-1", cwd: process.cwd() }),
     ...overrides,

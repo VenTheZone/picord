@@ -108,6 +108,7 @@ export interface DiscordPortRuntimeAdapter {
   isStreaming(conversationKey: string): boolean;
   steer(conversationKey: string, text: string): Promise<boolean>;
   abort(conversationKey: string): Promise<boolean>;
+  waitForRespondDone(conversationKey: string): Promise<void>;
   reset(conversationKey: string): Promise<boolean>;
   restartSession(conversationKey: string, workspaceKey: string): Promise<boolean>;
   compactSession(conversationKey: string, instructions?: string): Promise<boolean>;

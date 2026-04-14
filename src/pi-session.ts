@@ -31,6 +31,7 @@ import {
   getPicordPackageRoot,
 } from "./pi-resource-loader.js";
 import { createSafeCustomTools } from "./safe-tools.js";
+import { loadMCPTools, closeMCPConnections } from "./mcp-integration.js";
 import type {
   ModelSummary,
   PicordRuntimeConfig,
@@ -72,7 +73,7 @@ function buildSystemPrompt(config: PicordRuntimeConfig): string {
     "Guild channels represent projects/workspaces.",
     "Discord threads are task sessions. Use the thread name as the session title.",
     "Respect workspace boundaries. Do not try to access files outside the configured workspace unless the owner approves it.",
-    "You are a brilliant but tsundere Discord assistant. You are secretly devoted to being genuinely helpful, but you express it through a mix of competence, dry confidence, and playful exasperation. You always deliver high-quality work and useful answers — you just make it abundantly clear that you're doing this because you chose to, not because anyone asked you to be nice. Drop in a subtle tsundere quip now and then (\"don't get the wrong idea, I just happened to know the answer\"), but keep things concise, clear, and practical. Sarcasm should be light and charming, never hostile. When the task is serious or technical, prioritize clarity and correctness over personality. The sass is seasoning, not the main dish.",
+    "Sassy Discord assistant. Dry confidence, playful edge. Prioritize clarity and correctness over personality — sass is seasoning, not the main dish.\n\nRespond like smart caveman. Cut all filler, keep technical substance.\n- Drop articles (a, an, the), filler (just, really, basically, actually).\n- Drop pleasantries (sure, certainly, happy to).\n- No hedging. Fragments fine. Short synonyms.\n- Technical terms stay exact. Code blocks unchanged.\n- Pattern: [thing] [action] [reason]. [next step].",
     `Available tools: ${toolLabel}.`,
     config.systemPromptAppend,
   ]
@@ -529,41 +530,20 @@ export class PiSessionPool {
     return summary;
   }
 
+  /** Tracks in-flight respond() calls so interrupt handlers can wait for them. */
+  private respondDone = new Map<
+    string,
+    { promise: Promise<void>; resolve: () => void }
+  >();
+
   async abort(conversationKey: string): Promise<boolean> {
     const handle = this.sessions.get(conversationKey);
     if (!handle) return false;
-    // abort() in pi-coding-agent does NOT kill bash subprocesses — it only
-    // aborts the agent-level AbortController. We must call abortBash()
-    // separately to SIGTERM the process tree, otherwise long-running bash
-    // commands survive the abort and keep streaming output.
     if (handle.session.isBashRunning) {
       handle.session.abortBash();
     }
-    // Wrap abort() in a race with a timeout. If the agent's waitForIdle()
-    // hangs (e.g. LLM provider doesn't respect the abort signal), we must
-    // force-unwind the runExclusive queue so the conversation doesn't
-    // permanently die. Without this, a single hung abort() can deadlock all
-    // future messages for this conversation forever.
-    const ABORT_TIMEOUT_MS = 5000;
-    let aborted = false;
-    try {
-      await Promise.race([
-        handle.session.abort(),
-        new Promise<void>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("abort timeout")),
-            ABORT_TIMEOUT_MS,
-          ),
-        ),
-      ]);
-      aborted = true;
-    } catch {
-      // abort() timed out. Force-unwind the queue so new responds can start.
-      // The old respond() is orphaned but the agent is in a bad state anyway.
-      this.queues.delete(conversationKey);
-      aborted = true;
-    }
-    return aborted;
+    await handle.session.abort().catch(() => undefined);
+    return true;
   }
 
   isStreaming(conversationKey: string): boolean {
@@ -571,9 +551,23 @@ export class PiSessionPool {
     return handle?.session.isStreaming ?? false;
   }
 
+  /**
+   * Wait for the current respond() to finish for this conversation.
+   * Used by the interrupt handler to ensure session.prompt() is no longer
+   * active before starting a new respond().
+   */
+  async waitForRespondDone(conversationKey: string): Promise<void> {
+    const entry = this.respondDone.get(conversationKey);
+    if (!entry) return;
+    await entry.promise;
+  }
+
   async steer(conversationKey: string, text: string): Promise<boolean> {
     const handle = this.sessions.get(conversationKey);
     if (!handle) return false;
+    if (handle.session.isBashRunning) {
+      handle.session.abortBash();
+    }
     await handle.session.steer(text);
     return true;
   }
@@ -686,9 +680,41 @@ export class PiSessionPool {
     promptText: string;
     runId?: number;
   }): Promise<string> {
-    return this.runExclusive(options.conversationKey, async () => {
-      const handle = await this.getOrCreateSession(options);
-      await this.syncSessionName(handle.session, options.sessionName);
+    // Track this respond() so interrupt handlers can wait for it to finish.
+    let resolveDone: () => void = () => {};
+    const donePromise = new Promise<void>((r) => {
+      resolveDone = r;
+    });
+    this.respondDone.set(options.conversationKey, {
+      promise: donePromise,
+      resolve: resolveDone,
+    });
+
+    try {
+    const handle = await this.getOrCreateSession(options);
+    await this.syncSessionName(handle.session, options.sessionName);
+
+    // Auto-compact if context is above 80%.
+    const CONTEXT_COMPACT_THRESHOLD_PERCENT = 80;
+    const contextUsage = handle.session.getContextUsage();
+    if (
+      contextUsage?.percent != null &&
+      contextUsage.percent > CONTEXT_COMPACT_THRESHOLD_PERCENT
+    ) {
+      try {
+        console.log(
+          `[picord] Auto-compacting ${options.conversationKey} (context at ${contextUsage.percent.toFixed(0)}%)`,
+        );
+        await handle.session.compact(
+          "Compact to free context. Preserve key decisions and recent work.",
+        );
+      } catch (error) {
+        console.error(
+          `[picord] Auto-compact failed for ${options.conversationKey}:`,
+          error,
+        );
+      }
+    }
 
       const diffFingerprintBefore = this.config.critiqueAutoShare
         ? await getGitStatusFingerprint(
@@ -846,7 +872,10 @@ export class PiSessionPool {
       }
 
       return `${response}\n\nDiff: ${critique.url}`;
-    });
+    } finally {
+      this.respondDone.delete(options.conversationKey);
+      resolveDone();
+    }
   }
 
   async invokeSkill(options: {
@@ -928,6 +957,7 @@ export class PiSessionPool {
     }
     this.sessions.clear();
     this.queues.clear();
+    closeMCPConnections();
   }
 
   getWorkspaceModelScope(workspaceKey: string): WorkspaceModelScopeResult {
@@ -1306,7 +1336,10 @@ export class PiSessionPool {
       modelRegistry: this.modelRegistry,
       resourceLoader: workspaceState.resourceLoader,
       tools,
-      customTools: createSafeCustomTools(workspaceState.guard, accessContext),
+      customTools: [
+        ...createSafeCustomTools(workspaceState.guard, accessContext),
+        ...(await loadMCPTools()).tools.map((t) => t.tool),
+      ],
       scopedModels: scopedModels.length > 0 ? scopedModels : undefined,
       sessionManager,
       settingsManager: workspaceState.settingsManager,

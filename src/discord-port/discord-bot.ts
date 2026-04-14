@@ -19,6 +19,26 @@ import { DiscordPortRuntime } from "./runtime.js";
 import type { DiscordPortRuntimeAdapter } from "./types.js";
 import type { AccountManager } from "./multi-auth-integration.js";
 
+/**
+ * Truncate error messages for display, especially rate limit errors.
+ */
+function truncateErrorMessage(text: string): string {
+  // Check for rate limit / quota errors
+  if (/\b429\b/i.test(text) || /rate.limit|quota.exceeded|too.many.requests/i.test(text)) {
+    // Extract the core error message for 429s
+    const match = text.match(/429[^\n]*/i) || text.match(/rate.limit[^\n]*/i) || text.match(/Too many[^\n]*/i);
+    if (match) {
+      return `Provider Error: ${match[0].slice(0, 200)}`;
+    }
+    return `Provider Error: Rate limited. Please wait and try again.`;
+  }
+  // Truncate long error messages
+  if (text.length > 500) {
+    return `${text.slice(0, 497)}...`;
+  }
+  return text;
+}
+
 function isThreadChannel(channel: Message["channel"]): boolean {
   return (
     channel.type === ChannelType.PublicThread ||
@@ -148,11 +168,14 @@ export function registerDiscordPortBot({
           const conversationKey = `discord:dm:${message.channelId}`;
 
           if (runtime.adapter.isStreaming(conversationKey)) {
-            // Clear the renderer BEFORE abort so old subscription events
-            // are dropped, not routed to the new renderer. Otherwise the
-            // old run's follow-up messages appear above the user's.
+            // Seal old renderer so its message stops updating, then abort
+            // the agent and wait for old respond() to fully exit before
+            // starting a new one. This ensures the new bot message appears
+            // BELOW the user's message, not above it.
             await runtime.adapter.sealLiveRenderer(conversationKey);
             runtime.adapter.clearLiveRenderer(conversationKey);
+            await runtime.adapter.abort(conversationKey).catch(() => false);
+            await runtime.adapter.waitForRespondDone(conversationKey);
           }
 
           if ("sendTyping" in message.channel) {
@@ -160,9 +183,10 @@ export function registerDiscordPortBot({
           }
 
           const runId = nextRunId(conversationKey);
-          await runtime.adapter.abort(conversationKey).catch(() => false);
+          const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
           const renderer = new LiveDiscordRunRenderer(
             createChannelLiveMessageTarget(message.channel),
+            { thinkingVisible },
           );
           runtime.adapter.registerLiveRenderer(
             conversationKey,
@@ -203,11 +227,18 @@ export function registerDiscordPortBot({
           const binding = runtime.bindThread(thread);
 
           if (runtime.adapter.isStreaming(binding.conversationKey)) {
-            // Clear the renderer BEFORE abort so old subscription events
-            // are dropped, not routed to the new renderer. Otherwise the
-            // old run's follow-up messages appear above the user's.
+            // Seal old renderer so its message stops updating, then abort
+            // the agent and wait for old respond() to fully exit before
+            // starting a new one. This ensures the new bot message appears
+            // BELOW the user's message, not above it.
             await runtime.adapter.sealLiveRenderer(binding.conversationKey);
             runtime.adapter.clearLiveRenderer(binding.conversationKey);
+            await runtime.adapter
+              .abort(binding.conversationKey)
+              .catch(() => false);
+            await runtime.adapter.waitForRespondDone(
+              binding.conversationKey,
+            );
           }
 
           if ("sendTyping" in message.channel) {
@@ -215,11 +246,10 @@ export function registerDiscordPortBot({
           }
 
           const runId = nextRunId(binding.conversationKey);
-          await runtime.adapter
-            .abort(binding.conversationKey)
-            .catch(() => false);
+          const thinkingVisible = runtime.adapter.getThinkingVisibility(binding.conversationKey);
           const renderer = new LiveDiscordRunRenderer(
             createChannelLiveMessageTarget(thread),
+            { thinkingVisible },
           );
           runtime.adapter.registerLiveRenderer(
             binding.conversationKey,
@@ -267,9 +297,10 @@ export function registerDiscordPortBot({
 
         const binding = runtime.bindThread(thread);
         const runId = nextRunId(binding.conversationKey);
-        await runtime.adapter.abort(binding.conversationKey).catch(() => false);
+        const thinkingVisible = runtime.adapter.getThinkingVisibility(binding.conversationKey);
         const renderer = new LiveDiscordRunRenderer(
           createChannelLiveMessageTarget(thread),
+          { thinkingVisible },
         );
         runtime.adapter.registerLiveRenderer(
           binding.conversationKey,
@@ -304,8 +335,9 @@ export function registerDiscordPortBot({
         }
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
-        onError?.(`discord-port message flow error: ${text}`);
-        await replyToMessage(message, `picord error: ${text}`).catch(
+        const truncatedText = truncateErrorMessage(text);
+        onError?.(`discord-port message flow error: ${truncatedText}`);
+        await replyToMessage(message, `picord error: ${truncatedText}`).catch(
           () => undefined,
         );
       }
@@ -318,6 +350,7 @@ export function registerDiscordPortBot({
 
   client.on(Events.Error, (error) => {
     const text = error instanceof Error ? error.message : String(error);
+    const truncatedText = truncateErrorMessage(text);
     if (
       text.includes("Unknown interaction") ||
       text.includes("Interaction has already been acknowledged")
@@ -325,7 +358,7 @@ export function registerDiscordPortBot({
       onWarning?.(`discord-port ignored stale interaction error: ${text}`);
       return;
     }
-    onError?.(`discord-port client error: ${text}`);
+    onError?.(`discord-port client error: ${truncatedText}`);
   });
 }
 

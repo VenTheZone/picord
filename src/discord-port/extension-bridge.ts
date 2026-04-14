@@ -128,14 +128,30 @@ export async function startDiscordPortExtensionRuntime({
   cwd: string;
   notify: (message: string, level?: "info" | "warning" | "error") => void;
 }): Promise<DiscordPortBridgeHandle> {
+  // Guard against unhandled rejections crashing the process
+  const rejectionHandler = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    notify(`discord-port unhandled rejection: ${message}`, "error");
+  };
+  process.on("unhandledRejection", rejectionHandler);
+
+  const exceptionHandler = (error: Error) => {
+    notify(`discord-port uncaught exception: ${error.message}\n${error.stack ?? ""}`, "error");
+  };
+  process.on("uncaughtException", exceptionHandler);
+
   const config = loadRuntimeConfig(cwd);
   if (!config.isActive || !config.discordToken) {
+    process.off("unhandledRejection", rejectionHandler);
+    process.off("uncaughtException", exceptionHandler);
     notify("discord-port inactive: set PICORD_DISCORD_TOKEN to enable Discord.", "info");
     return { stop: async () => undefined };
   }
 
   const lockResult = RuntimeLock.acquire(resolveRuntimeLockPath(config.statePath));
   if (!lockResult.acquired) {
+    process.off("unhandledRejection", rejectionHandler);
+    process.off("uncaughtException", exceptionHandler);
     notify(`discord-port inactive: ${lockResult.reason}`, "warning");
     return { stop: async () => undefined };
   }
@@ -216,6 +232,9 @@ export async function startDiscordPortExtensionRuntime({
       return;
     }
     cleanedUp = true;
+
+    process.off("unhandledRejection", rejectionHandler);
+    process.off("uncaughtException", exceptionHandler);
 
     if (client) {
       await client.destroy().catch(() => undefined);
@@ -335,10 +354,6 @@ export async function startDiscordPortExtensionRuntime({
     }
     await start(false);
   }
-
-  pi.on("session_shutdown", async () => {
-    await cleanup(`discord-port disconnected${slashOnlyMode ? " (slash-only mode)" : ""}.`);
-  });
 
   return {
     client,
