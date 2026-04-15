@@ -1,7 +1,7 @@
 import type { Guild, Message, ThreadChannel } from "discord.js";
 import type { AccessRequest, ApprovalDecisionMode } from "../access-approval.js";
 import type { LiveDiscordRunRenderer } from "../live-discord-renderer.js";
-import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel, WorkspaceInfo, WorkspaceModelScopeResult } from "../types.js";
+import type { CavemanLevel, ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel, WorkspaceInfo, WorkspaceModelScopeResult } from "../types.js";
 
 export interface ManagedProjectRecord {
   channelId: string;
@@ -73,6 +73,8 @@ export interface DiscordPortRuntimeAdapter {
   getEffectiveThinkingLevel(conversationKey: string, workspaceKey: string): ThinkingLevel;
   setThinkingVisibility(conversationKey: string, visible: boolean): void;
   getThinkingVisibility(conversationKey: string): boolean;
+  setCavemanLevel(conversationKey: string, level: CavemanLevel): void;
+  getEffectiveCavemanLevel(conversationKey: string): CavemanLevel;
   listLoginProviders(): LoginProviderOption[];
   setProviderApiKey(providerId: string, apiKey: string): void;
   startProviderOAuthLogin(providerId: string, userId: string): Promise<{ url: string; instructions?: string; pendingPrompt?: { message: string; placeholder?: string; allowEmpty?: boolean } }>;

@@ -2,6 +2,9 @@
  * MCP (Model Context Protocol) integration for picord.
  *
  * Supports connecting to MCP servers configured in ~/.pi/mcp.json.
+ * Built-in MCP servers are auto-configured:
+ *   - Exa (web search): always enabled; uses MCP OAuth flow or optional API key
+ *
  * Tools from MCP servers are exposed as custom tools.
  *
  * MCP support is optional. If the @modelcontextprotocol/sdk is not installed,
@@ -30,19 +33,24 @@ type MCPStdioModule = {
 type MCPSseModule = {
   SSEClientTransport: new (url: URL) => MCPTransport;
 };
+type MCPStreamableHttpModule = {
+  StreamableHTTPClientTransport: new (url: URL, options?: { requestInit?: RequestInit }) => MCPTransport;
+};
 
 let mcpSdkModule: MCPModule | null | undefined;
 let mcpStdioModule: MCPStdioModule | null | undefined;
 let mcpSseModule: MCPSseModule | null | undefined;
+let mcpStreamableHttpModule: MCPStreamableHttpModule | null | undefined;
 
 // MCP type definitions
 export interface MCPServerConfig {
   name?: string;
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "streamable-http";
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface MCPConfig {
@@ -82,20 +90,27 @@ type MCPTransport = unknown;
 export async function isMCPSupported(): Promise<boolean> {
   if (mcpSdkModule !== undefined) return mcpSdkModule !== null;
   try {
-    // @ts-expect-error MCP SDK may not be installed (optional dependency)
     const sdkMod = await import("@modelcontextprotocol/sdk/client/index.js") as unknown;
-    // @ts-expect-error MCP SDK may not be installed (optional dependency)
     const stdioMod = await import("@modelcontextprotocol/sdk/client/stdio.js") as unknown;
-    // @ts-expect-error MCP SDK may not be installed (optional dependency)
     const sseMod = await import("@modelcontextprotocol/sdk/client/sse.js") as unknown;
     mcpSdkModule = sdkMod as MCPModule;
     mcpStdioModule = stdioMod as MCPStdioModule;
     mcpSseModule = sseMod as MCPSseModule;
+
+    // Streamable HTTP transport is optional (newer SDK versions)
+    try {
+      const httpMod = await import("@modelcontextprotocol/sdk/client/streamableHttp.js") as unknown;
+      mcpStreamableHttpModule = httpMod as MCPStreamableHttpModule;
+    } catch {
+      mcpStreamableHttpModule = null;
+    }
+
     return true;
   } catch {
     mcpSdkModule = null;
     mcpStdioModule = null;
     mcpSseModule = null;
+    mcpStreamableHttpModule = null;
     return false;
   }
 }
@@ -118,6 +133,50 @@ export function loadMCPConfig(): MCPConfig | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Build built-in MCP server configurations.
+ *
+ * Exa is always enabled. If an API key is provided it is sent as a header;
+ * otherwise the Exa hosted server handles auth via MCP OAuth flow
+ * (users authenticate in-browser, no pre-existing key required).
+ */
+export function buildBuiltInMCPConfig(options?: {
+  exaApiKey?: string;
+}): MCPConfig {
+  const servers: Record<string, MCPServerConfig> = {};
+
+  servers["exa"] = {
+    name: "Exa Search",
+    transport: "streamable-http",
+    url: "https://mcp.exa.ai/mcp",
+    ...(options?.exaApiKey ? { headers: { "x-api-key": options.exaApiKey } } : {}),
+  };
+
+  return { servers };
+}
+
+/**
+ * Merge built-in and user MCP configs. Built-in servers take precedence
+ * if a user configures a server with the same ID.
+ */
+function mergeMCPConfigs(
+  builtIn: MCPConfig | undefined,
+  user: MCPConfig | undefined,
+): MCPConfig {
+  const servers: Record<string, MCPServerConfig> = {};
+
+  if (user?.servers) {
+    Object.assign(servers, user.servers);
+  }
+
+  if (builtIn?.servers) {
+    // Built-in servers override user servers with the same key
+    Object.assign(servers, builtIn.servers);
+  }
+
+  return { servers };
 }
 
 /**
@@ -182,6 +241,26 @@ function mcpSchemaToTypeBox(inputSchema?: Record<string, unknown>): TSchema {
  * Create MCP transport for a server configuration.
  */
 function createMCPTransport(config: MCPServerConfig): MCPTransport {
+  if (config.transport === "streamable-http" && config.url) {
+    if (!mcpStreamableHttpModule) {
+      throw new Error(
+        "MCP SDK does not support streamable-http transport. Update @modelcontextprotocol/sdk or use stdio/sse.",
+      );
+    }
+
+    const options: { requestInit?: RequestInit } = {};
+    if (config.headers && Object.keys(config.headers).length > 0) {
+      options.requestInit = {
+        headers: config.headers,
+      };
+    }
+
+    return new mcpStreamableHttpModule.StreamableHTTPClientTransport(
+      new URL(config.url),
+      options,
+    );
+  }
+
   if (!mcpStdioModule || !mcpSseModule) {
     throw new Error("MCP SDK not available");
   }
@@ -264,18 +343,23 @@ const activeMCPConnections: { serverId: string; client: MCPClient }[] = [];
  * Load MCP tools from configured servers.
  *
  * MCP support is optional. If SDK not installed, returns empty arrays.
+ *
+ * @param options.exaApiKey - Optional Exa API key to skip OAuth; without it Exa uses MCP OAuth flow
  */
-export async function loadMCPTools(): Promise<{
+export async function loadMCPTools(options?: {
+  exaApiKey?: string;
+}): Promise<{
   tools: MCPWrappedTool[];
 }> {
   if (!(await isMCPSupported())) {
     return { tools: [] };
   }
 
-  const config = loadMCPConfig();
-  if (!config) {
-    return { tools: [] };
-  }
+  const builtInConfig = buildBuiltInMCPConfig({
+    exaApiKey: options?.exaApiKey,
+  });
+  const userConfig = loadMCPConfig();
+  const config = mergeMCPConfigs(builtInConfig, userConfig);
 
   const wrappedTools: MCPWrappedTool[] = [];
 
@@ -314,6 +398,28 @@ export async function loadMCPTools(): Promise<{
   }
 
   return { tools: wrappedTools };
+}
+
+/**
+ * Get MCP diagnostics for troubleshooting.
+ */
+export async function getMCPDiagnostics(options?: {
+  exaApiKey?: string;
+}): Promise<{
+  sdkInstalled: boolean;
+  streamableHttpSupported: boolean;
+  builtInServers: string[];
+  userConfigPath: string | undefined;
+  userServers: string[];
+}> {
+  const sdkInstalled = await isMCPSupported();
+  return {
+    sdkInstalled,
+    streamableHttpSupported: mcpStreamableHttpModule !== null && mcpStreamableHttpModule !== undefined,
+    builtInServers: Object.keys(buildBuiltInMCPConfig({ exaApiKey: options?.exaApiKey }).servers),
+    userConfigPath: loadMCPConfig() ? "~/.pi/mcp.json" : undefined,
+    userServers: Object.keys(loadMCPConfig()?.servers ?? {}),
+  };
 }
 
 /**

@@ -1938,6 +1938,25 @@ export function registerDiscordPortInteractionHandler({
         return;
       }
 
+  if (interaction.commandName === "caveman") {
+    const thread = requireSessionThreadIfGuild(interaction);
+    const conversationKey = runtime.getConversationKeyForLocation({
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      thread,
+    });
+    const cavemanLevel = interaction.options.getString(
+      "level",
+      true,
+    ) as import("../types.js").CavemanLevel;
+    runtime.adapter.setCavemanLevel(conversationKey, cavemanLevel);
+    await interaction.reply({
+      content: `Caveman level set to ${cavemanLevel}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
       if (interaction.commandName === "ask") {
         const thread = requireSessionThreadIfGuild(interaction);
         const workspaceKey = runtime.getWorkspaceKeyForLocation({

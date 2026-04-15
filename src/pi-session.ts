@@ -35,7 +35,7 @@ import { loadMCPTools, closeMCPConnections } from "./mcp-integration.js";
 import type {
   ModelSummary,
   PicordRuntimeConfig,
-  SkillSummary,
+  CavemanLevel, SkillSummary,
   ThinkingLevel,
   WorkspaceInfo,
   WorkspaceModelScopeResult,
@@ -62,6 +62,18 @@ interface WorkspaceState {
   selectedThinkingLevel?: ThinkingLevel;
 }
 
+function buildCavemanPrompt(cavemanLevel: CavemanLevel): string {
+  const prompts: Record<CavemanLevel, string> = {
+    off: "",
+    lite: "Respond terse. No filler/hedging. Keep articles + full sentences. Professional but tight. Drop: just/really/basically/actually/simply.",
+    full: "Respond like smart caveman. Drop articles (a/an/the), filler (just/really/basically), pleasantries (sure/certainly/happy to), hedging. Fragments OK. Short synonyms. Technical terms exact. Code blocks unchanged. Pattern: thing action reason. Next step.",
+    ultra: "Maximum compression. Abbreviate (DB/auth/config/req/res/fn). Strip conjunctions. Arrows for causality (X → Y). One word when enough.",
+    "wenyan-lite": "Semi-classical Chinese terse. Drop filler. Keep grammar structure, classical register.",
+    "wenyan-full": "文言文 terse. Classical sentence patterns, subjects omitted, classical particles (之/乃/為/其).",
+    "wenyan-ultra": "Ultra terse 文言文. Maximum classical compression.",
+  };
+  return prompts[cavemanLevel] ?? "";
+}
 function buildSystemPrompt(config: PicordRuntimeConfig): string {
   const toolLabel =
     config.toolMode === "coding"
@@ -73,7 +85,7 @@ function buildSystemPrompt(config: PicordRuntimeConfig): string {
     "Guild channels represent projects/workspaces.",
     "Discord threads are task sessions. Use the thread name as the session title.",
     "Respect workspace boundaries. Do not try to access files outside the configured workspace unless the owner approves it.",
-    "Sassy Discord assistant. Dry confidence, playful edge. Prioritize clarity and correctness over personality — sass is seasoning, not the main dish.\n\nRespond like smart caveman. Cut all filler, keep technical substance.\n- Drop articles (a, an, the), filler (just, really, basically, actually).\n- Drop pleasantries (sure, certainly, happy to).\n- No hedging. Fragments fine. Short synonyms.\n- Technical terms stay exact. Code blocks unchanged.\n- Pattern: [thing] [action] [reason]. [next step].",
+    "Sassy Discord assistant. Dry confidence, playful edge. Prioritize clarity over personality.\n\n" + buildCavemanPrompt(config.cavemanLevel),
     `Available tools: ${toolLabel}.`,
     config.systemPromptAppend,
   ]
@@ -180,6 +192,7 @@ export class PiSessionPool {
     ThinkingLevel
   >();
   private readonly conversationThinkingVisibility = new Map<string, boolean>();
+  private readonly conversationCavemanLevels = new Map<string, CavemanLevel>();
   private readonly approvals: AccessApprovalManager;
   private readonly registry: WorkspaceRegistry;
   private readonly pendingOAuthLogins = new Map<string, PendingOAuthLogin>();
@@ -210,6 +223,28 @@ export class PiSessionPool {
   }
 
   async initialize(): Promise<void> {
+    // Apply model context window overrides
+    if (this.config.modelOverrides) {
+      for (const [modelRef, overrides] of Object.entries(this.config.modelOverrides)) {
+        const [provider, id] = modelRef.includes("/") ? modelRef.split("/", 2) : ["", modelRef];
+        const model = provider ? this.modelRegistry.find(provider, id) : this.modelRegistry.getAvailable().find(m => m.id === id);
+        if (model) {
+          if (overrides.contextWindow !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (model as any).contextWindow = overrides.contextWindow;
+            console.log(`[picord] Overrode ${modelRef} contextWindow to ${overrides.contextWindow}`);
+          }
+          if (overrides.maxOutputTokens !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (model as any).maxOutputTokens = overrides.maxOutputTokens;
+          }
+          if (overrides.supportsThinking !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (model as any).supportsThinking = overrides.supportsThinking;
+          }
+        }
+      }
+    }
     this.registry.load();
     const roots = new Set<string>([
       this.config.cwd,
@@ -834,9 +869,11 @@ export class PiSessionPool {
           event.message.role === "assistant" &&
           event.message.stopReason === "error"
         ) {
+          const rawError = event.message.errorMessage ?? "Unknown provider error.";
+          const truncatedError = rawError.length > 200 ? rawError.slice(0, 197) + "..." : rawError;
           enqueueUpdate({
             type: "assistant_delta",
-            delta: `\n\n❌ Provider error: ${event.message.errorMessage ?? "Unknown provider error."}`,
+            delta: `\n\n❌ Provider error: ${truncatedError}`,
           });
         }
       });
@@ -1126,6 +1163,17 @@ export class PiSessionPool {
     return this.conversationThinkingVisibility.get(conversationKey) ?? false; // default hidden
   }
 
+  getEffectiveCavemanLevel(conversationKey: string): CavemanLevel {
+    return (
+      this.conversationCavemanLevels.get(conversationKey) ??
+      this.config.cavemanLevel ??
+      "off"
+    );
+  }
+
+  setCavemanLevel(conversationKey: string, level: CavemanLevel): void {
+    this.conversationCavemanLevels.set(conversationKey, level);
+  }
   getBlockedPathPatterns(): string[] {
     return [...this.config.blockedPathPatterns];
   }
@@ -1342,7 +1390,7 @@ export class PiSessionPool {
       tools,
       customTools: [
         ...createSafeCustomTools(workspaceState.guard, accessContext),
-        ...(await loadMCPTools()).tools.map((t) => t.tool),
+        ...(await loadMCPTools({ exaApiKey: this.config.exaApiKey })).tools.map((t) => t.tool),
       ],
       scopedModels: scopedModels.length > 0 ? scopedModels : undefined,
       sessionManager,

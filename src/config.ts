@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { PicordFileConfig, PicordRuntimeConfig, ThinkingLevel, ToolMode } from "./types.js";
+import type { CavemanLevel, PicordFileConfig, PicordRuntimeConfig, ThinkingLevel, ToolMode } from "./types.js";
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
+const DEFAULT_CAVEMAN_LEVEL: CavemanLevel = "off";
 const DEFAULT_TOOL_MODE: ToolMode = "coding";
 const DEFAULT_WORKSPACE_BASE_PATH = path.join(homedir(), ".picord", "workspace");
 const DEFAULT_HOST_CHANNEL_NAME = "host";
@@ -68,6 +69,21 @@ function normalizeThinkingLevel(value: unknown): ThinkingLevel {
   }
 }
 
+function normalizeCavemanLevel(value: unknown): CavemanLevel {
+  switch (value) {
+    case "lite":
+    case "full":
+    case "ultra":
+    case "wenyan-lite":
+    case "wenyan-full":
+    case "wenyan-ultra":
+    case "off":
+      return value;
+    default:
+      return DEFAULT_CAVEMAN_LEVEL;
+  }
+}
+
 export function resolveConfigPath(baseDir: string, env: NodeJS.ProcessEnv): string | undefined {
   const configuredPath = env.PICORD_CONFIG?.trim();
   if (configuredPath) {
@@ -103,6 +119,7 @@ export function loadRuntimeConfig(
   const workspaceBasePath = fileConfig.workspaceBasePath
     ? resolvePathValue(baseDir, fileConfig.workspaceBasePath)
     : DEFAULT_WORKSPACE_BASE_PATH;
+  const exaApiKey = env.PICORD_EXA_API_KEY?.trim() || fileConfig.exaApiKey?.trim();
 
   return {
     ...fileConfig,
@@ -133,9 +150,12 @@ export function loadRuntimeConfig(
         : DEFAULT_HOST_CHANNEL_NAME,
     registerCommands: normalizeBoolean(fileConfig.registerCommands, true),
     thinkingLevel: normalizeThinkingLevel(fileConfig.thinkingLevel),
+    cavemanLevel: normalizeCavemanLevel(fileConfig.cavemanLevel),
     critiqueAutoShare: normalizeBoolean(fileConfig.critiqueAutoShare, false),
     systemPromptAppend:
       typeof fileConfig.systemPromptAppend === "string" ? fileConfig.systemPromptAppend.trim() : "",
     multiAuth: fileConfig.multiAuth && typeof fileConfig.multiAuth === "object" ? fileConfig.multiAuth : {},
+    exaApiKey,
+    modelOverrides: fileConfig.modelOverrides && typeof fileConfig.modelOverrides === "object" ? fileConfig.modelOverrides : {},
   };
 }

@@ -39,9 +39,10 @@ import {
   type PiLiveUpdate,
 } from "./live-discord-renderer.js";
 import { PiSessionPool } from "./pi-session.js";
+import { getMCPDiagnostics } from "./mcp-integration.js";
 import { resolveRuntimeArch } from "./runtime-arch.js";
 import { RuntimeLock } from "./runtime-lock.js";
-import type { PicordRuntimeConfig, SkillSummary } from "./types.js";
+import type { CavemanLevel, PicordRuntimeConfig, SkillSummary } from "./types.js";
 import type { SupportedProviderId } from "./multi-auth/index-export.js";
 
 const RESERVED_COMMAND_NAMES = new Set([
@@ -50,6 +51,8 @@ const RESERVED_COMMAND_NAMES = new Set([
   "reset",
   "resume",
   "status",
+  "mcp-status",
+  "caveman",
   "models",
   "scope-models",
   "use-model",
@@ -125,6 +128,35 @@ function buildStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
   return new SlashCommandBuilder()
     .setName("status")
     .setDescription("Show picord status")
+    .toJSON();
+}
+
+function buildMCPStatusCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("mcp-status")
+    .setDescription("Show MCP server status and diagnostics")
+    .toJSON();
+}
+
+function buildCavemanCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("caveman")
+    .setDescription("Set caveman terse mode level")
+    .addStringOption((option) =>
+      option
+        .setName("level")
+        .setDescription("Caveman level (off, lite, full, ultra, wenyan-lite, wenyan-full, wenyan-ultra)")
+        .setRequired(true)
+        .addChoices(
+          { name: "off", value: "off" },
+          { name: "lite", value: "lite" },
+          { name: "full", value: "full" },
+          { name: "ultra", value: "ultra" },
+          { name: "wenyan-lite", value: "wenyan-lite" },
+          { name: "wenyan-full", value: "wenyan-full" },
+          { name: "wenyan-ultra", value: "wenyan-ultra" },
+        ),
+    )
     .toJSON();
 }
 
@@ -229,6 +261,8 @@ async function buildSlashCommands(
     buildResetCommand(),
     buildResumeCommand(),
     buildStatusCommand(),
+    buildMCPStatusCommand(),
+    buildCavemanCommand(),
     buildModelsCommand(),
     buildScopeModelsCommand(),
     buildUseModelCommand(),
@@ -1121,7 +1155,33 @@ export default function picordExtension(pi: ExtensionAPI) {
         ephemeral,
       });
       return;
+  }
+
+  if (interaction.commandName === "mcp-status") {
+    const diag = await getMCPDiagnostics({ exaApiKey: effectiveConfig.exaApiKey });
+    await interaction.reply({
+      content: [
+        "**MCP Status**",
+        `SDK installed: ${diag.sdkInstalled ? "✓" : "✗"}`,
+        `Streamable HTTP: ${diag.streamableHttpSupported ? "✓" : "✗ (update @modelcontextprotocol/sdk)"}`,
+        `Built-in servers: ${diag.builtInServers.join(", ") || "(none)"}`,
+        `User config: ${diag.userConfigPath || "(not found)"}`,
+        `User servers: ${diag.userServers.join(", ") || "(none)"}`,
+      ].join("\n"),
+      ephemeral,
+    });
+    return;
     }
+
+  if (interaction.commandName === "caveman") {
+    const level = interaction.options.getString("level", true) as CavemanLevel;
+    sessionPool.setCavemanLevel(workspaceKey, level);
+    await interaction.reply({
+      content: `Caveman level set to **${level}**. New session uses terse mode.\n\n- off: Normal style\n- lite: No filler, keep grammar\n- full: Drop articles, fragments OK\n- ultra: Maximum compression\n- wenyan-*: Classical Chinese`,
+      ephemeral,
+    });
+    return;
+  }
 
     if (interaction.commandName === "models") {
       const scope = sessionPool.getWorkspaceModelScope(workspaceKey);

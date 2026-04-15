@@ -28,6 +28,7 @@ const RESERVED_COMMAND_NAMES = new Set([
   "review",
   "access-requests",
   "outside-workspace-access",
+  "caveman",
 ]);
 
 function truncateDescription(description: string): string {
@@ -121,6 +122,27 @@ function buildThinkingVisibilityCommand(): RESTPostAPIChatInputApplicationComman
   return new SlashCommandBuilder()
     .setName("think-visibility")
     .setDescription("Toggle whether to show thinking process in the chat")
+    .toJSON();
+}
+
+function buildCavemanCommand(): RESTPostAPIChatInputApplicationCommandsJSONBody {
+  return new SlashCommandBuilder()
+    .setName("caveman")
+    .setDescription("Set the caveman level for terse responses")
+    .addStringOption((option) => option
+      .setName("level")
+      .setDescription("Caveman level")
+      .addChoices(
+        { name: "off", value: "off" },
+        { name: "lite", value: "lite" },
+        { name: "full", value: "full" },
+        { name: "ultra", value: "ultra" },
+        { name: "wenyan-lite", value: "wenyan-lite" },
+        { name: "wenyan-full", value: "wenyan-full" },
+        { name: "wenyan-ultra", value: "wenyan-ultra" },
+      )
+      .setRequired(true),
+    )
     .toJSON();
 }
 
@@ -337,6 +359,7 @@ export function buildDiscordPortCommands(skills: SkillSummary[] = []): RESTPostA
     buildUseModelCommand("model"),
     buildThinkCommand(),
     buildThinkingVisibilityCommand(),
+    buildCavemanCommand(),
     buildLoginCommand(),
     buildReloadCommand(),
     buildRestartCommand(),

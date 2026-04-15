@@ -1,5 +1,6 @@
 export type ToolMode = "read-only" | "coding";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CavemanLevel = "off" | "lite" | "full" | "ultra" | "wenyan-lite" | "wenyan-full" | "wenyan-ultra";
 export type MultiAuthRotationMode = "round-robin" | "usage-based" | "balancer";
 
 export interface MultiAuthPicordConfig {
@@ -29,6 +30,13 @@ export interface MultiAuthPicordConfig {
   };
 }
 
+export interface ModelOverride {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsThinking?: boolean;
+  isReasoning?: boolean;
+}
+
 export interface PicordFileConfig {
   allowDm?: boolean;
   cwd?: string;
@@ -52,6 +60,9 @@ export interface PicordFileConfig {
   critiqueAutoShare?: boolean;
   systemPromptAppend?: string;
   multiAuth?: MultiAuthPicordConfig;
+  exaApiKey?: string;
+  modelOverrides?: Record<string, ModelOverride>;
+  cavemanLevel?: CavemanLevel;
 }
 
 export interface PicordRuntimeConfig extends PicordFileConfig {
@@ -79,6 +90,9 @@ export interface PicordRuntimeConfig extends PicordFileConfig {
   critiqueAutoShare: boolean;
   systemPromptAppend: string;
   multiAuth: MultiAuthPicordConfig;
+  exaApiKey?: string;
+  modelOverrides?: Record<string, ModelOverride>;
+  cavemanLevel: CavemanLevel;
 }
 
 export interface GuildAccessInput {

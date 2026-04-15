@@ -205,6 +205,7 @@ export PICORD_DISCORD_TOKEN=your_discord_bot_token
 export PICORD_DISCORD_APPLICATION_ID=your_application_id
 export PICORD_CONFIG=/absolute/or/relative/path/to/picord.config.json
 export PICORD_RUNTIME_ARCH=legacy
+export PICORD_EXA_API_KEY=your_exa_api_key
 ```
 
 ### Example config
@@ -247,6 +248,33 @@ export PICORD_RUNTIME_ARCH=legacy
 - `hostChannelName`: fallback control channel name; defaults to `host`
 - `blockedPathPatterns`: sensitive files that stay blocked or approval-gated
 - `critiqueAutoShare`: when true, picord appends a critique.work diff link after Discord runs that change the git working tree
+- `exaApiKey`: Optional Exa API key to skip OAuth flow; Exa works without it via MCP OAuth
+
+## Built-in MCP servers
+
+Picord includes built-in MCP servers that are automatically enabled. These load in addition to any servers configured in `~/.pi/mcp.json`.
+
+### Exa (web search)
+
+[Exa](https://exa.ai) provides AI-powered web search, code search, and company research tools. Exa is **always enabled** — no API key required. On first use, Exa's hosted MCP server initiates an OAuth flow so you can authenticate in-browser for free access.
+
+**Configuration (optional):**
+
+If you have an Exa API key and want to skip the OAuth flow, set it via environment variable:
+```bash
+export PICORD_EXA_API_KEY=your_exa_api_key
+```
+
+Or in `picord.config.json`:
+```json
+{
+  "exaApiKey": "your_exa_api_key"
+}
+```
+
+Get your API key at [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys).
+
+Requires `@modelcontextprotocol/sdk` with streamable HTTP transport support (v1.9.0+). If the SDK version doesn't support streamable HTTP, the Exa server is silently skipped.
 
 ## How to use it
 

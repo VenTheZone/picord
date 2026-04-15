@@ -17,5 +17,11 @@
   "registerCommands": true,
   "thinkingLevel": "off",
   "critiqueAutoShare": false,
-  "systemPromptAppend": "Keep Discord responses concise unless the user asks for detail."
+  "cavemanLevel": "off",
+  "systemPromptAppend": "Keep Discord responses concise unless the user asks for detail.",
+  "exaApiKey": "OPTIONAL_SET_PICORD_EXA_API_KEY_ENV_INSTEAD",
+  "modelOverrides": {
+    "minimax/m2.7": { "contextWindow": 205000 },
+    "moonshot-ai/kimi-k2.5": { "contextWindow": 256000 }
+  }
 }

@@ -10,7 +10,7 @@ interface RegisteredLiveRenderer {
   runId?: number;
 }
 import type { PiSessionPool } from "../pi-session.js";
-import type { ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel } from "../types.js";
+import type { CavemanLevel, ModelSummary, PicordRuntimeConfig, SkillSummary, ThinkingLevel } from "../types.js";
 import type {
   DiscordPortRuntimeAdapter,
   LoginProviderOption,
@@ -121,6 +121,14 @@ export class PiSessionPoolAdapter implements DiscordPortRuntimeAdapter {
 
   getThinkingVisibility(conversationKey: string): boolean {
     return this.sessionPool.getThinkingVisibility(conversationKey);
+  }
+
+  setCavemanLevel(conversationKey: string, level: CavemanLevel): void {
+    return this.sessionPool.setCavemanLevel(conversationKey, level);
+  }
+
+  getEffectiveCavemanLevel(conversationKey: string): CavemanLevel {
+    return this.sessionPool.getEffectiveCavemanLevel(conversationKey);
   }
 
   listLoginProviders(): LoginProviderOption[] {
