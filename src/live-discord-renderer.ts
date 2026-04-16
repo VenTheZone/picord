@@ -333,8 +333,19 @@ export class LiveDiscordRunRenderer {
   private runContextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   private accessRequest?: { content: string; requestId?: string; handle?: EditableMessageHandle };
 
+  private initialPlaceholderSent = false;
+
   constructor(private readonly target: LiveMessageTarget, options?: { thinkingVisible?: boolean }) {
     this.thinkingVisible = options?.thinkingVisible ?? false;
+  }
+
+  /** Show immediate placeholder message before any content arrives. */
+  async showThinkingPlaceholder(): Promise<void> {
+    if (this.initialPlaceholderSent || this.finalized) return;
+    this.initialPlaceholderSent = true;
+    const payload: LiveMessagePayload = { content: RESPONSE_PLACEHOLDER };
+    const handle = await this.target.ensurePrimary(payload);
+    this.handles.push(handle);
   }
 
   setSkillContext(skillName: string, args?: string): void {

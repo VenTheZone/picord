@@ -201,6 +201,8 @@ export function registerDiscordPortBot({
             createChannelLiveMessageTarget(message.channel),
             { thinkingVisible },
           );
+      // Show placeholder immediately for perceived responsiveness.
+      await renderer.showThinkingPlaceholder().catch(() => undefined);
           runtime.adapter.registerLiveRenderer(
             conversationKey,
             renderer,
@@ -315,6 +317,9 @@ export function registerDiscordPortBot({
           createChannelLiveMessageTarget(thread),
           { thinkingVisible },
         );
+        // Show placeholder immediately so user sees feedback while
+        // workspace loads + session initializes (1-3s cold start).
+        await renderer.showThinkingPlaceholder().catch(() => undefined);
         runtime.adapter.registerLiveRenderer(
           binding.conversationKey,
           renderer,
