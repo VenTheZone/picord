@@ -230,16 +230,13 @@ export class PiSessionPool {
         const model = provider ? this.modelRegistry.find(provider, id) : this.modelRegistry.getAvailable().find(m => m.id === id);
         if (model) {
           if (overrides.contextWindow !== undefined) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (model as any).contextWindow = overrides.contextWindow;
             console.log(`[picord] Overrode ${modelRef} contextWindow to ${overrides.contextWindow}`);
           }
           if (overrides.maxOutputTokens !== undefined) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (model as any).maxOutputTokens = overrides.maxOutputTokens;
           }
           if (overrides.supportsThinking !== undefined) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (model as any).supportsThinking = overrides.supportsThinking;
           }
         }
@@ -879,6 +876,12 @@ export class PiSessionPool {
       });
 
       try {
+        // If the SDK is still internally processing (race condition with
+        // isStreaming check in discord-bot), abort immediately so the new
+        // prompt takes over. User expects instant interruption, not queuing.
+        if (handle.session.isStreaming) {
+          await handle.session.abort();
+        }
         await handle.session.prompt(options.promptText);
         enqueueRunState();
         await notifyQueue;
