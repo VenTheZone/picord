@@ -882,7 +882,18 @@ export class PiSessionPool {
         if (handle.session.isStreaming) {
           await handle.session.abort().catch(() => undefined);
         }
-        await handle.session.prompt(options.promptText);
+        // SDK may still be settling after abort - brief delay prevents race
+        await new Promise((r) => setTimeout(r, 50));
+        // Wrap prompt to catch "already processing" race and rethrow cleanly
+        try {
+          await handle.session.prompt(options.promptText);
+        } catch (promptError) {
+          const errorMsg = String(promptError);
+          if (errorMsg.includes("already processing")) {
+            console.error(`[picord] Session still processing for ${options.conversationKey}, abort failed to clear state`);
+          }
+          throw promptError;
+        }
         enqueueRunState();
         await notifyQueue;
       } finally {
