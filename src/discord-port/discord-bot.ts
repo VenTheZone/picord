@@ -224,7 +224,10 @@ export function registerDiscordPortBot({
             if (!isLatestRun(conversationKey, runId)) {
               return;
             }
-            throw error;
+            console.error(`[picord] DM respond failed:
+`, error);
+          await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+          return;
           } finally {
             runtime.adapter.clearLiveRenderer(conversationKey, renderer);
           }
@@ -287,7 +290,10 @@ export function registerDiscordPortBot({
             if (!isLatestRun(binding.conversationKey, runId)) {
               return;
             }
-            throw error;
+            console.error(`[picord] DM respond failed:
+`, error);
+          await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+          return;
           } finally {
             runtime.adapter.clearLiveRenderer(
               binding.conversationKey,
@@ -347,7 +353,10 @@ export function registerDiscordPortBot({
           if (!isLatestRun(binding.conversationKey, runId)) {
             return;
           }
-          throw error;
+          console.error(`[picord] DM respond failed:
+`, error);
+          await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+          return;
         } finally {
           runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
         }
