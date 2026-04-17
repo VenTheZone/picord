@@ -880,7 +880,7 @@ export class PiSessionPool {
         // isStreaming check in discord-bot), abort immediately so the new
         // prompt takes over. User expects instant interruption, not queuing.
         if (handle.session.isStreaming) {
-          await handle.session.abort();
+          await handle.session.abort().catch(() => undefined);
         }
         await handle.session.prompt(options.promptText);
         enqueueRunState();
