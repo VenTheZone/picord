@@ -884,13 +884,25 @@ export class PiSessionPool {
         }
         // SDK may still be settling after abort - brief delay prevents race
         await new Promise((r) => setTimeout(r, 50));
-        // Wrap prompt to catch "already processing" race and rethrow cleanly
+        // Wrap prompt with timeout - session can deadlock and hang forever
+        const PROMPT_TIMEOUT_MS = 60000; // 60s max for any prompt
+        const promptPromise = handle.session.prompt(options.promptText);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Prompt timeout - session may be deadlocked")), PROMPT_TIMEOUT_MS)
+        );
         try {
-          await handle.session.prompt(options.promptText);
+          await Promise.race([promptPromise, timeoutPromise]);
         } catch (promptError) {
           const errorMsg = String(promptError);
-          if (errorMsg.includes("already processing")) {
-            console.error(`[picord] Session still processing for ${options.conversationKey}, abort failed to clear state`);
+          if (errorMsg.includes("already processing") || errorMsg.includes("deadlocked") || errorMsg.includes("timeout")) {
+            console.error(`[picord] Session stuck for ${options.conversationKey}: ${errorMsg}`);
+            // Nuclear option: destroy stuck session, next call creates fresh one
+            const stuckHandle = this.sessions.get(options.conversationKey);
+            if (stuckHandle) {
+              stuckHandle.session.abort().catch(() => undefined);
+              this.sessions.delete(options.conversationKey);
+              console.error(`[picord] Destroyed stuck session for ${options.conversationKey}`);
+            }
           }
           throw promptError;
         }
