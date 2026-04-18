@@ -896,8 +896,14 @@ export class PiSessionPool {
           const errorMsg = String(promptError);
           if (errorMsg.includes("already processing") || errorMsg.includes("deadlocked") || errorMsg.includes("timeout")) {
             console.error(`[picord] Session stuck for ${options.conversationKey}: ${errorMsg}`);
-            // NOTE: Session NOT destroyed to preserve history.
-            // Manual intervention may be required to recover stuck session.
+            // Auto reconnect: dispose stuck session, keep file, recreate fresh on next message
+            console.error(`[picord] Auto reconnect: disposing stuck session for ${options.conversationKey}`);
+            await handle.session.abort().catch(() => undefined);
+            handle.session.dispose();
+            this.sessions.delete(options.conversationKey);
+            console.error(`[picord] Session disposed. History preserved. Send another message to continue.`);
+            // Replace error with user-friendly message
+            throw new Error("Session timed out - send another message to auto-reconnect");
           }
           throw promptError;
         }
