@@ -896,13 +896,8 @@ export class PiSessionPool {
           const errorMsg = String(promptError);
           if (errorMsg.includes("already processing") || errorMsg.includes("deadlocked") || errorMsg.includes("timeout")) {
             console.error(`[picord] Session stuck for ${options.conversationKey}: ${errorMsg}`);
-            // Nuclear option: destroy stuck session, next call creates fresh one
-            const stuckHandle = this.sessions.get(options.conversationKey);
-            if (stuckHandle) {
-              stuckHandle.session.abort().catch(() => undefined);
-              this.sessions.delete(options.conversationKey);
-              console.error(`[picord] Destroyed stuck session for ${options.conversationKey}`);
-            }
+            // NOTE: Session NOT destroyed to preserve history.
+            // Manual intervention may be required to recover stuck session.
           }
           throw promptError;
         }
