@@ -1527,6 +1527,18 @@ export default function picordExtension(pi: ExtensionAPI) {
         ctx.ui.notify(`picord discord client error: ${message}`, "error");
       });
 
+      discordClient.on(Events.ShardDisconnect, (event, id) => {
+        ctx.ui.notify(`picord discord shard ${id} disconnected (code ${event.code}), will auto-reconnect`, "warning");
+      });
+
+      discordClient.on(Events.ShardReconnecting, (id) => {
+        ctx.ui.notify(`picord discord shard ${id} reconnecting...`, "warning");
+      });
+
+      discordClient.on(Events.ShardResume, (id, replayed) => {
+        ctx.ui.notify(`picord discord shard ${id} resumed (${replayed} events replayed)`, "info");
+      });
+
       discordClient.once(Events.ClientReady, async () => {
         try {
           const createdRoles = await ensureAllowedRolesExist(

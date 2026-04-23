@@ -180,16 +180,21 @@ export function registerDiscordPortBot({
         if (!message.inGuild()) {
           const conversationKey = `discord:dm:${message.channelId}`;
 
-          if (runtime.adapter.isStreaming(conversationKey)) {
-            // Seal old renderer so its message stops updating, then abort
-            // the agent and wait for old respond() to fully exit before
-            // starting a new one. This ensures the new bot message appears
-            // BELOW the user's message, not above it.
-            await runtime.adapter.sealLiveRenderer(conversationKey);
-            runtime.adapter.clearLiveRenderer(conversationKey);
-            await runtime.adapter.abort(conversationKey).catch(() => false);
-            await runtime.adapter.waitForRespondDone(conversationKey);
-          }
+          // Always abort first to clear any stuck state, then respond.
+          await runtime.adapter.sealLiveRenderer(conversationKey);
+          runtime.adapter.clearLiveRenderer(conversationKey);
+          await runtime.adapter.abort(conversationKey).catch(() => false);
+          await runtime.adapter.waitForRespondDone(conversationKey);
+
+
+
+
+
+
+
+
+
+
 
           if ("sendTyping" in message.channel) {
             await message.channel.sendTyping().catch(() => undefined);

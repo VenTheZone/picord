@@ -887,9 +887,10 @@ export class PiSessionPool {
         // Wrap prompt with timeout - session can deadlock and hang forever
         const PROMPT_TIMEOUT_MS = 60000; // 60s max for any prompt
         const promptPromise = handle.session.prompt(options.promptText);
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Prompt timeout - session may be deadlocked")), PROMPT_TIMEOUT_MS)
-        );
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("Prompt timeout - session may be deadlocked")), PROMPT_TIMEOUT_MS);
+        });
         try {
           await Promise.race([promptPromise, timeoutPromise]);
         } catch (promptError) {
@@ -906,6 +907,8 @@ export class PiSessionPool {
             throw new Error("Session timed out - send another message to auto-reconnect");
           }
           throw promptError;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
         }
         enqueueRunState();
         await notifyQueue;
