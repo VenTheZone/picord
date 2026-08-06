@@ -1,6 +1,6 @@
 {
   "name": "@venthezone/picord",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "type": "module",
   "description": "Discord integration extension for pi that maps project channels to workspaces and threads to native pi sessions.",
   "keywords": [
@@ -40,7 +40,6 @@
     "test": "vitest --run",
     "check": "npm run lint && npm run typecheck && npm run test",
     "doctor": "npm run build && node dist/doctor.js",
-    "smoke:discord": "npm run build && node dist/discord-smoke.js",
     "smoke:discord": "npm run build && node dist/discord-smoke.js",
     "sync:discord-commands": "npm run build && node dist/discord-sync-commands.js",
     "picord:start": "./scripts/picord.sh start",
