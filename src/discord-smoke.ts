@@ -2,7 +2,6 @@ import { Client, GatewayIntentBits } from "discord.js";
 import { loadRuntimeConfig } from "./config.js";
 import { buildDiscordPortCommands } from "./discord-port/command-registration.js";
 import { PiSessionPool } from "./pi-session.js";
-import { resolveRuntimeArch } from "./runtime-arch.js";
 
 async function loginWithFallback(config: ReturnType<typeof loadRuntimeConfig>): Promise<{
   client: Client;
@@ -37,7 +36,6 @@ async function loginWithFallback(config: ReturnType<typeof loadRuntimeConfig>): 
 
 async function main(): Promise<void> {
   const config = loadRuntimeConfig(process.cwd(), process.env);
-  const runtimeArch = resolveRuntimeArch(process.env);
 
   if (!config.discordToken) {
     throw new Error("PICORD_DISCORD_TOKEN is not set.");
@@ -86,7 +84,6 @@ async function main(): Promise<void> {
 
     console.log("DISCORD SMOKE TEST");
     console.log("==================");
-    console.log(`Runtime architecture: ${runtimeArch}`);
     console.log(`Bot user: ${client.user?.tag} (${client.user?.id})`);
     console.log(`Application: ${app?.name ?? "unknown"} (${app?.id ?? "unknown"})`);
     console.log(`Guild: ${fullGuild.name} (${fullGuild.id})`);
@@ -110,7 +107,7 @@ async function main(): Promise<void> {
     console.log(`Existing guild commands: ${guildCommands?.size ?? 0}`);
 
     const failures: string[] = [];
-    if (runtimeArch === "discord-port") {
+    {
       const expectedCommands = buildDiscordPortCommands(sessionPool.getSkillSummaries()).map((command) => command.name).sort();
       const actualCommands = [...(guildCommands?.values() ?? [])].map((command) => command.name).sort();
       const missingCommands = expectedCommands.filter((name) => !actualCommands.includes(name));

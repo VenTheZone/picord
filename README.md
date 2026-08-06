@@ -21,10 +21,7 @@ If you remember one thing, remember this:
 
 ## Runtime
 
-- Default runtime: `discord-port`
-- Legacy fallback: `PICORD_RUNTIME_ARCH=legacy`
-
-`discord-port` is the main runtime and the one you should use unless you have a specific reason not to.
+`discord-port` is the only runtime.
 
 ## What picord gives you
 
@@ -204,7 +201,6 @@ export PICORD_DISCORD_TOKEN=your_discord_bot_token
 ```bash
 export PICORD_DISCORD_APPLICATION_ID=your_application_id
 export PICORD_CONFIG=/absolute/or/relative/path/to/picord.config.json
-export PICORD_RUNTIME_ARCH=legacy
 export PICORD_EXA_API_KEY=your_exa_api_key
 ```
 
@@ -378,11 +374,7 @@ Useful commands:
 ```bash
 npm run check
 npm run doctor
-npm run doctor:discord-port
-npm run doctor:legacy
 npm run smoke:discord
-npm run smoke:discord:port
-npm run smoke:discord:legacy
 npm run sync:discord-commands
 ```
 

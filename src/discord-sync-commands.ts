@@ -4,21 +4,14 @@ import { loadRuntimeConfig } from "./config.js";
 import { buildDiscordPortCommands } from "./discord-port/command-registration.js";
 import { buildAllMultiAuthCommands } from "./discord-port/multi-auth-commands.js";
 import { PiSessionPool } from "./pi-session.js";
-import { resolveRuntimeArch } from "./runtime-arch.js";
 import { initMultiAuthConfig } from "./multi-auth/multi-auth-config.js";
 import { buildMultiAuthExtensionConfig } from "./multi-auth/picord-config-adapter.js";
 import { AccountManager } from "./discord-port/multi-auth-integration.js";
 import type { SupportedProviderId } from "./multi-auth/index-export.js";
 
 
-
 async function main(): Promise<void> {
   const config = loadRuntimeConfig(process.cwd(), process.env);
-  const runtimeArch = resolveRuntimeArch(process.env);
-
-  if (runtimeArch !== "discord-port") {
-    throw new Error("Command sync currently supports the discord-port runtime only.");
-  }
 
   if (!config.discordToken) {
     throw new Error("PICORD_DISCORD_TOKEN is not set.");
@@ -63,7 +56,6 @@ async function main(): Promise<void> {
 
     console.log("PICORD COMMAND SYNC");
     console.log("===================");
-    console.log(`Runtime architecture: ${runtimeArch}`);
     console.log(`Application: ${client.application.name ?? "unknown"} (${client.application.id ?? "unknown"})`);
     console.log(`Commands to register: ${commands.length}`);
 

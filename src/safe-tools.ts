@@ -3,14 +3,10 @@ import path from "node:path";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import type { AccessContext, WorkspaceGuard } from "./path-policy.js";
+import { globToRegExp } from "./path-policy.js";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function globToRegExp(pattern: string): RegExp {
-  const escaped = escapeRegExp(pattern).replace(/\\\*/g, ".*").replace(/\\\?/g, ".");
-  return new RegExp(`^${escaped}$`, "i");
 }
 
 function toRelativeDisplay(root: string, absolutePath: string): string {

@@ -1,6 +1,5 @@
 import { statSync } from "node:fs";
 import { loadRuntimeConfig } from "./config.js";
-import { resolveRuntimeArch } from "./runtime-arch.js";
 
 interface CheckResult {
   level: "pass" | "warn" | "fail";
@@ -23,7 +22,6 @@ function isDirectory(target: string): boolean {
 function run(): number {
   const cwd = process.cwd();
   const config = loadRuntimeConfig(cwd, process.env);
-  const runtimeArch = resolveRuntimeArch(process.env);
   const results: CheckResult[] = [];
 
   results.push({
@@ -31,11 +29,6 @@ function run(): number {
     message: config.configPath
       ? `Using config file: ${config.configPath}`
       : "No picord.config.json found; using defaults/env only.",
-  });
-
-  results.push({
-    level: "pass",
-    message: `Runtime architecture: ${runtimeArch}`,
   });
 
   results.push({
@@ -134,7 +127,6 @@ function run(): number {
   console.log(`- workspaceBasePath: ${config.workspaceBasePath}`);
   console.log(`- hostChannelId: ${config.hostChannelId ?? "(auto-resolve by name)"}`);
   console.log(`- hostChannelName: ${config.hostChannelName}`);
-  console.log(`- runtimeArch: ${runtimeArch}`);
   console.log(`- toolMode: ${config.toolMode}`);
   console.log(`- thinkingLevel: ${config.thinkingLevel}`);
 

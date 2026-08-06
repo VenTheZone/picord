@@ -26,6 +26,8 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, "i");
 }
 
+export { globToRegExp };
+
 function isBinaryBuffer(buffer: Buffer): boolean {
   const sample = buffer.subarray(0, Math.min(buffer.length, 512));
   for (const byte of sample) {
