@@ -24,7 +24,7 @@ All notable changes to this project will be documented in this file.
   the OAuth provider select menu, giving an early clear message pointing to the
   host channel instead of failing mid-flow when the user picks a provider.
 
-## Unreleased
+## 0.4.0 (2026-08-09)
 
 ### Changed
 - Simplified Discord live rendering to avoid extra chat clutter.
@@ -40,3 +40,5 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Added visible rendering for skill usage in live Discord responses.
 - Added visible rendering for subagent usage in live Discord responses.
+- Added multi-auth balancer with key and global distributors for credential rotation.
+- Added cascade state tracking and picord config adapter for multi-auth.
