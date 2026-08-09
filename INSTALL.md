@@ -1,213 +1,181 @@
-# Picord Installation Guide
+# Picord Agent Installation Guide
 
-This guide helps you install and configure picord from source, working alongside your pi agent.
+This guide is written for a **coding agent** (pi) that is setting up picord on
+behalf of a user. Work through the steps in order. Every step that says
+"ask the user" means: stop, request that input in a clear message, and wait
+for the answer before continuing.
 
-[!NOTE]
-If you already have **pi** installed and running, you can install picord directly from your pi agent by running:
+**Agent rules**
+
+- Never invent Discord credentials, IDs, or tokens. If a value is missing, ask.
+- Never put the bot token in `picord.config.json` or any committed file. It is an environment variable only.
+- Do not commit `picord.config.json` or `picord.state.json`; both are gitignored.
+- If a step fails, tell the user what failed and what you tried before moving on.
+
+---
+
+## 0. What you need from the user
+
+Before installing, collect these from the user. This is the only part you
+cannot do yourself:
+
+| Value | Where the user gets it | Required |
+|---|---|---|
+| Discord bot token | Discord Developer Portal → your app → Bot → **Reset Token** | yes |
+| Owner Discord user ID | Discord client → Settings → Advanced → enable **Developer Mode**, then right-click the user → **Copy User ID** | yes |
+| Guild (server) ID | Right-click the server → **Copy Server ID** | yes |
+| Host channel name | A text channel for admin commands (default: `host`) | no (defaults apply) |
+
+Application ID is **optional** — picord reads it from the bot client at
+runtime. If the user has it handy, use it for reference, but never block
+installation on it.
+
+If the user does not yet have a Discord application, guide them through
+Section 2 first, then collect the values.
+
+---
+
+## 1. Check prerequisites
+
+Run these checks and report the result to the user:
+
+```bash
+node -v     # need 20.6 or newer
+pi --version
+```
+
+If pi is missing, tell the user and point them to pi's quickstart
+(https://github.com/earendil-works/pi-coding-agent) — do not install it
+yourself without asking.
+
+---
+
+## 2. Guide the user through the Discord app setup
+
+The user needs a Discord application with a bot. Give them this checklist:
+
+1. Go to https://discord.com/developers/applications → **New Application**.
+2. **Bot** page → **Reset Token** and copy it. Keep it secret.
+3. **Bot** page → Privileged Gateway Intents → enable **Message Content Intent**.
+   (Without it the bot only works via slash commands.)
+4. **OAuth2 → URL Generator** → select the bot, then scopes `bot` and
+   `applications.commands`.
+5. With the `bot` scope selected, choose permissions:
+   `View Channels`, `Send Messages`, `Send Messages in Threads`,
+   `Create Public Threads`, `Manage Threads`, `Read Message History`,
+   `Use Application Commands`, `Manage Channels`.
+6. Copy the generated URL, open it, and invite the bot to the guild.
+
+Then collect the values from Section 0 and confirm each one with the user
+before proceeding.
+
+---
+
+## 3. Install picord into pi
 
 ```bash
 pi install npm:@venthezone/picord
+pi list   # confirm picord appears in the installed packages
 ```
 
-Then configure it as described below.
-
-## Prerequisites
-
-- Node.js 20.6 or newer
-- Git
-- Access to a Discord application (bot token + Application ID)
-- pi installed and working
-
----
-
-## Step 1: Clone Repository
-
-Choose a location for your picord workspace, then:
+If the user is developing picord itself, install from the local checkout
+instead:
 
 ```bash
-git clone https://github.com/VenTheZone/picord.git
-cd picord
+cd /path/to/picord
+pi install ./picord
 ```
 
 ---
 
-## Step 2: Install Dependencies
+## 4. Create the config file
 
-```bash
-npm ci
-```
+The bot reads `picord.config.json` from pi's working directory (cwd), or from
+the path in the `PICORD_CONFIG` environment variable.
 
----
-
-## Step 3: Create Configuration
-
-Create `picord.config.json` in this repository root (or in a separate config directory; see below). Minimal example:
+Create the config in the user's project directory (not inside the picord
+package). Use the values the user provided:
 
 ```json
 {
-  "discordToken": "YOUR_BOT_TOKEN",
-  "discordApplicationId": "YOUR_APPLICATION_ID",
-  "ownerUserId": "YOUR_DISCORD_USER_ID",
-  "allowedGuildIds": ["YOUR_GUILD_ID"],
-  "hostChannelName": "host"
+  "ownerUserId": "USER_ID_FROM_STEP_0",
+  "allowedGuildIds": ["GUILD_ID_FROM_STEP_0"],
+  "hostChannelName": "host",
+  "registerCommands": true
 }
 ```
 
-**Field explanations:**
+Optional but useful for real use:
 
-- `discordToken` — Bot token from Discord Developer Portal (required)
-- `discordApplicationId` — Application ID (required for slash commands)
-- `ownerUserId` — Your Discord user ID for admin commands (required)
-- `allowedGuildIds` — Which guilds picord operates in (empty allows all, but restrict for prod)
-- `hostChannelName` — Text channel name used for control commands (default: `host`)
-- `statePath` — Where credentials/session state are stored (default: `./picord.state.json`)
-- `workspaceBasePath` — Base path for project workspaces (default: `~/.picord/workspace`)
-- `multiAuth` — Multi-auth provider configuration (see below)
+- `allowDm` — allow the bot in DMs (default `true`)
+- `allowedRoleNames` — e.g. `["picord"]`, restrict usage to users with a role
+- `allowedChannelIds` — restrict to specific channels
+- `workspaceBasePath` — where `/project-create` makes workspaces (default `~/.picord/workspace`)
 
-For detailed field descriptions, see `picord.config.example.json`.
-
----
-
-## Step 4: Set Environment Variables (Optional)
-
-Instead of putting secrets in the config file, you can use environment variables:
+If the config lives somewhere other than the pi cwd, set:
 
 ```bash
-export PICORD_DISCORD_TOKEN="your-bot-token"
-export PICORD_DISCORD_APPLICATION_ID="your-application-id"
+export PICORD_CONFIG=/absolute/path/to/picord.config.json
 ```
 
-The environment overrides config file values.
+Full field reference: `picord.config.example.json` in the package.
 
-### Encryption Key (Recommended)
+---
 
-To encrypt stored credentials, set `PICORD_ENCRYPTION_KEY`:
+## 5. Set the Discord token
+
+The token is an environment variable — never put it in the JSON config.
 
 ```bash
-# Generate a secure key
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-
-# Set it as an environment variable
-export PICORD_ENCRYPTION_KEY="your-generated-key-here"
+export PICORD_DISCORD_TOKEN="token_from_step_2"
 ```
 
-**Important:**
-- Store this key securely (e.g., in a password manager)
-- Without this key, credentials are stored in plaintext
-- If you lose the key, encrypted credentials cannot be recovered
+`DISCORD_BOT_TOKEN` also works as a fallback. Tell the user where this
+environment variable should live permanently (`.env`, shell profile, or their
+process manager) and make sure it is not committed to git.
+
+Optional: `PICORD_ENCRYPTION_KEY` encrypts stored credentials at rest.
 
 ---
 
-## Step 5: Build Picord
+## 6. Start and verify
 
-```bash
-npm run build
-```
+picord is a pi extension: it starts the Discord bot when a pi session starts.
 
----
+1. Run pi in the directory that contains `picord.config.json`:
+   ```bash
+   pi
+   ```
+2. Expect a notify message: `discord-port: connected` (or a warning explaining
+   why it stayed inactive — usually the token).
+3. In Discord, check the bot shows **online** in the guild, then test:
+   - In the host channel (default `host`), run `/status` — should reply.
+   - Create a project channel with `/project-create name=test`, start a
+     thread in it, and `/ask hello` — should reply in the thread.
 
-## Step 6: Register Slash Commands
-
-```bash
-npm run sync:discord-commands
-```
-
-This registers all slash commands (`/ask`, `/login`, `/multi-auth`, etc.) to your Discord application in the configured guilds.
-
-**Note:** If you add new commands or change command definitions, re-run this.
-
----
-
-## Step 7: Run Picord
-
-```bash
-npm run picord:start
-```
-
-Or manually:
-
-```bash
-node dist/index.js
-```
-
-Picord will connect to Discord and print status.
+Slash commands register automatically on startup (`registerCommands` defaults
+to `true`), so no manual sync is needed.
 
 ---
 
-## Step 8: Test in Discord
+## 7. Troubleshooting the agent can do on its own
 
-- In your guild, find the **host channel** (named `host` by default)
-- Create a project channel with `/project-create name=myproject`
-- Start a thread in that channel and use `/ask` to verify responses
+| Symptom | Check |
+|---|---|
+| Bot stays offline | `PICORD_DISCORD_TOKEN` set? Bot token reset after invite? Invite re-run with new token. |
+| Bot online but silent | Message Content Intent enabled? Bot in `allowedGuildIds`? Host channel exists? |
+| `/status` no reply | `ownerUserId` matches the user? Running in host channel? `registerCommands` true and bot re-invited after intent change? |
+| "Access denied" | Add the user to `allowedUserIds`/`allowedRoleNames`, or the agent approves via `/access-allow` as owner. |
+| Commands missing after code changes | Re-run `pi update npm:@venthezone/picord` and restart pi. |
 
----
-
-## Multi‑Auth Setup (Optional)
-
-Picord supports multiple credentials per provider via `/login` and `/multi-auth` commands.
-
-Add multi-auth config to `picord.config.json`:
-
-```json
-{
-  "multiAuth": {
-    "enabled": true,
-    "excludeProviders": [],
-    "debug": false
-  }
-}
-```
-
-Then use:
-
-- `/login` — Add credentials (OAuth flow or API key modal)
-- `/multi-auth` — Status, delete, switch, rename, rotation, hide
-- `/usage` — Show rate limits/quota for your credentials
-
-Credentials are stored encrypted in `picord.state.json` (local only).
-
----
-
-## Troubleshooting
-
-**Bot appears online but commands don't show up:**
-- Ensure `discordApplicationId` is set and matches your bot's Application ID
-- Re‑run `npm run sync:discord-commands`
-- Check bot has `applications.commands` scope in OAuth2 → URL Generator
-- Wait up to 1 hour for global commands; guild commands appear instantly
-
-**Missing `MessageContent` intent:**
-- Enable **Message Content Intent** in Discord Developer Portal → Bot → Privileged Gateway Intents
-- If you can't enable it, picord falls back to slash‑only mode (still works)
-
-**No responses in threads:**
-- Make sure you're in a managed project channel or thread
-- Check picord logs for access denied errors
-- Verify `allowedGuildIds` includes your guild
-
-**Credential upload concerns:**
-- All credentials stay in `picord.state.json` on your machine
-- Multi-auth only sends credentials to the respective provider APIs (OpenAI, Anthropic, etc.) during normal operation
-- No telemetry is sent to remotepicord servers
-
-**Credentials stored in plaintext warning:**
-- Set `PICORD_ENCRYPTION_KEY` environment variable to enable encryption
-- Run `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` to generate a key
-
----
-
-## Advanced: Separate Config File
-
-You can keep your config outside the repository (e.g., `~/.config/picord/config.json`):
-
-```bash
-export PICORD_CONFIG="/path/to/picord.config.json"
-```
-
-Then keep `picord.config.json` in the repo as a template (copy and adjust paths).
+For anything else, report the exact error text to the user and ask.
 
 ---
 
 ## Uninstall
 
-Stop the running picord process. Remove the cloned repository if desired. Delete `picord.state.json` to clear credentials (optional).
+```bash
+pi remove npm:@venthezone/picord
+```
+
+Delete `picord.state.json` to clear stored credentials (optional).

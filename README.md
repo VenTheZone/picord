@@ -38,7 +38,11 @@ If you remember one thing, remember this:
 
 ## Quick start
 
-For a detailed, step‑by‑step installation guide you can run alongside your pi agent, see [INSTALL.md](INSTALL.md).
+**Setting up with a coding agent (pi)?** Point it at [INSTALL.md](INSTALL.md) —
+it's written as an agent-executable guide: it lists exactly what to ask the
+user for (bot token, user ID, guild ID), how to create the Discord app, and
+how to verify the setup. The steps below are the same flow, summarized for
+manual setup.
 
 ### 1. Install dependencies
 
