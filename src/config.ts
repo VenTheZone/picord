@@ -152,8 +152,11 @@ export function loadRuntimeConfig(
     thinkingLevel: normalizeThinkingLevel(fileConfig.thinkingLevel),
     cavemanLevel: normalizeCavemanLevel(fileConfig.cavemanLevel),
     critiqueAutoShare: normalizeBoolean(fileConfig.critiqueAutoShare, false),
+    autoApproveAccess: normalizeBoolean(fileConfig.autoApproveAccess, false),
     systemPromptAppend:
       typeof fileConfig.systemPromptAppend === "string" ? fileConfig.systemPromptAppend.trim() : "",
+    modelProvider: typeof fileConfig.modelProvider === "string" ? fileConfig.modelProvider.trim() : undefined,
+    modelId: typeof fileConfig.modelId === "string" ? fileConfig.modelId.trim() : undefined,
     multiAuth: fileConfig.multiAuth && typeof fileConfig.multiAuth === "object" ? fileConfig.multiAuth : {},
     exaApiKey,
     modelOverrides: fileConfig.modelOverrides && typeof fileConfig.modelOverrides === "object" ? fileConfig.modelOverrides : {},

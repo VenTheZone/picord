@@ -58,6 +58,7 @@ export interface PicordFileConfig {
   modelProvider?: string;
   modelId?: string;
   critiqueAutoShare?: boolean;
+  autoApproveAccess?: boolean;
   systemPromptAppend?: string;
   multiAuth?: MultiAuthPicordConfig;
   exaApiKey?: string;
@@ -88,6 +89,7 @@ export interface PicordRuntimeConfig extends PicordFileConfig {
   registerCommands: boolean;
   thinkingLevel: ThinkingLevel;
   critiqueAutoShare: boolean;
+  autoApproveAccess: boolean;
   systemPromptAppend: string;
   multiAuth: MultiAuthPicordConfig;
   exaApiKey?: string;

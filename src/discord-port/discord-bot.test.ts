@@ -38,7 +38,7 @@ function createClientStub() {
       list.push(handler);
       handlers.set(event, list);
     }),
-    user: { tag: "picord#0001" },
+    user: { tag: "picord#0001", id: "bot-1" },
     __emit: async (event: string | symbol, ...args: any[]) => {
       for (const handler of handlers.get(event) ?? []) {
         await handler(...args);
@@ -299,6 +299,7 @@ describe("discord-bot message flow", () => {
       guildId: "guild-1",
       channelId: "project-1",
       channel,
+      mentions: { has: (id: string) => id === "bot-1" },
       startThread: vi.fn(async (options: any) => {
         expect(options.autoArchiveDuration).toBe(
           ThreadAutoArchiveDuration.OneDay,

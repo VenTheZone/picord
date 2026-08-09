@@ -170,10 +170,14 @@ export function registerDiscordPortBot({
           message,
         );
         if (!access.allowed) {
-          await replyToMessage(
-            message,
-            access.reason ?? "You are not allowed to use this bot here.",
-          );
+          // Only explain the denial when the bot is explicitly mentioned;
+          // otherwise stay silent so the channel isn't spammed.
+          if (message.mentions.has(client.user?.id ?? "")) {
+            await replyToMessage(
+              message,
+              access.reason ?? "You are not allowed to use this bot here.",
+            );
+          }
           return;
         }
 
@@ -247,6 +251,11 @@ export function registerDiscordPortBot({
           const thread = message.channel as Parameters<
             typeof runtime.continueThread
           >[0]["thread"];
+          // Unarchive if the thread lapsed into archive while idle, so the
+          // response isn't rejected with Discord's archived-thread error.
+          if (thread.archived) {
+            await thread.setArchived(false).catch(() => undefined);
+          }
           const binding = runtime.bindThread(thread);
 
           if (runtime.adapter.isStreaming(binding.conversationKey)) {
@@ -309,6 +318,12 @@ export function registerDiscordPortBot({
         }
 
         if (!isProjectTextChannel(message.channel, runtime)) {
+          return;
+        }
+
+        // Only auto-create threads when the bot is mentioned, so channel
+        // chatter doesn't spawn sessions.
+        if (!message.mentions.has(client.user?.id ?? "")) {
           return;
         }
 

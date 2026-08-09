@@ -18,6 +18,17 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
+
+// Mirror of pi's resolveCliModel custom-id fallback: registry.find() misses
+// models only known to dynamic providers (e.g. opencode/deepseek-v4-flash-free).
+function fallbackModel(
+  provider: string,
+  id: string,
+  available: ReturnType<ModelRegistry["getAvailable"]>,
+) {
+  const base = available.find((m) => m.provider === provider);
+  return base ? { ...base, id, name: id } : undefined;
+}
 import type { PiLiveUpdate } from "./live-discord-renderer.js";
 import { AccessApprovalManager } from "./access-approval.js";
 import type { AccessContext } from "./path-policy.js";
@@ -217,6 +228,7 @@ export class PiSessionPool {
     this.approvals = new AccessApprovalManager(
       config.ownerUserId,
       notifyAccessRequest,
+      config.autoApproveAccess,
     );
     this.registry = new WorkspaceRegistry(config.statePath);
     this.notifyLiveUpdate = notifyLiveUpdate;
@@ -723,8 +735,19 @@ export class PiSessionPool {
     });
 
     try {
-    const handle = await this.getOrCreateSession(options);
-    await this.syncSessionName(handle.session, options.sessionName);
+    // Setup (workspace load, MCP, extensions) can hang forever with no
+    // timeout; bound it so a stuck server can't silence the bot.
+    const setupPromise = (async () => {
+      const handle = await this.getOrCreateSession(options);
+      await this.syncSessionName(handle.session, options.sessionName);
+      return handle;
+    })();
+    const handle = await Promise.race([
+      setupPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Session setup timed out")), 120000),
+      ),
+    ]);
 
     // Auto-compact if context is above 80%.
     const CONTEXT_COMPACT_THRESHOLD_PERCENT = 80;
@@ -884,32 +907,8 @@ export class PiSessionPool {
         }
         // SDK may still be settling after abort - brief delay prevents race
         await new Promise((r) => setTimeout(r, 50));
-        // Wrap prompt with timeout - session can deadlock and hang forever
-        const PROMPT_TIMEOUT_MS = 60000; // 60s max for any prompt
-        const promptPromise = handle.session.prompt(options.promptText);
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error("Prompt timeout - session may be deadlocked")), PROMPT_TIMEOUT_MS);
-        });
-        try {
-          await Promise.race([promptPromise, timeoutPromise]);
-        } catch (promptError) {
-          const errorMsg = String(promptError);
-          if (errorMsg.includes("already processing") || errorMsg.includes("deadlocked") || errorMsg.includes("timeout")) {
-            console.error(`[picord] Session stuck for ${options.conversationKey}: ${errorMsg}`);
-            // Auto reconnect: dispose stuck session, keep file, recreate fresh on next message
-            console.error(`[picord] Auto reconnect: disposing stuck session for ${options.conversationKey}`);
-            await handle.session.abort().catch(() => undefined);
-            handle.session.dispose();
-            this.sessions.delete(options.conversationKey);
-            console.error(`[picord] Session disposed. History preserved. Send another message to continue.`);
-            // Replace error with user-friendly message
-            throw new Error("Session timed out - send another message to auto-reconnect");
-          }
-          throw promptError;
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-        }
+        // Agentic runs take as long as they take; no prompt timeout.
+        await handle.session.prompt(options.promptText);
         enqueueRunState();
         await notifyQueue;
       } finally {
@@ -1308,9 +1307,10 @@ export class PiSessionPool {
  const globalPiExtensionsPath = path.join(homedir(), ".pi", "extensions");
     const resourceLoader = new DefaultResourceLoader({
       cwd: root,
+      agentDir: path.join(homedir(), ".pi", "agent"),
       settingsManager,
       noThemes: true,
-      appendSystemPrompt: buildSystemPrompt(this.config),
+      appendSystemPrompt: [buildSystemPrompt(this.config)],
       extensionsOverride: (base) => filterOutPicordExtensions(base),
       additionalSkillPaths: [picordSkillsPath, globalPiExtensionsPath],
     });
@@ -1362,7 +1362,8 @@ export class PiSessionPool {
       this.conversationModels.get(options.conversationKey) ??
       workspaceState.selectedModel;
     const model = selectedModel
-      ? this.modelRegistry.find(selectedModel.provider, selectedModel.id)
+      ? (this.modelRegistry.find(selectedModel.provider, selectedModel.id) ??
+        fallbackModel(selectedModel.provider, selectedModel.id, this.modelRegistry.getAvailable()))
       : undefined;
 
     const accessContext: AccessContext = {
@@ -1417,8 +1418,9 @@ export class PiSessionPool {
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       resourceLoader: workspaceState.resourceLoader,
-      tools,
+      noTools: "builtin",
       customTools: [
+        ...tools,
         ...createSafeCustomTools(workspaceState.guard, accessContext),
         ...(await loadMCPTools({ exaApiKey: this.config.exaApiKey })).tools.map((t) => t.tool),
       ],
@@ -1463,9 +1465,9 @@ export class PiSessionPool {
     const hasExistingSession =
       sessionManager.buildSessionContext().messages.length > 0;
     if (!hasExistingSession) {
-      if (typeof session.newSession === "function") {
-        await session.newSession({
-          setup: async (innerSessionManager) => {
+      if (typeof (session as any).newSession === "function") {
+        await (session as any).newSession({
+          setup: async (innerSessionManager: any) => {
             innerSessionManager.appendSessionInfo(options.sessionName);
           },
         });

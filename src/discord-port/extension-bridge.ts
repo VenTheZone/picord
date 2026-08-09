@@ -315,6 +315,18 @@ export async function startDiscordPortExtensionRuntime({
             notify(`restart notification failed: ${truncateErrorMessage(error instanceof Error ? error.message : String(error))}`, "warning");
           }
         }
+
+        const onlineChannelId = config.hostChannelId || config.allowedChannelIds[0];
+        if (onlineChannelId) {
+          try {
+            const channel = await createdClient.channels.fetch(onlineChannelId);
+            if (channel && "send" in channel) {
+              await sendTextResponse(channel, "✅ Picord is online.");
+            }
+          } catch (error) {
+            notify(`online notification failed: ${truncateErrorMessage(error instanceof Error ? error.message : String(error))}`, "warning");
+          }
+        }
       } catch (error) {
         notify(`command registration failed: ${truncateErrorMessage(error instanceof Error ? error.message : String(error))}`, "error");
       }

@@ -16,13 +16,17 @@ export function filterOutPicordExtensions(
   base: LoadExtensionsResult,
   picordRoot: string = getPicordPackageRoot(),
 ): LoadExtensionsResult {
+  // pi-mcp-access tries to connect MCP servers on session_start and throws
+  // "Not connected" in picord's headless sessions; picord brings its own MCP.
+  const excluded = (p: string) =>
+    isUnderRoot(p, picordRoot) || p.includes("pi-mcp-access");
   return {
-    extensions: base.extensions.filter((extension) => !isUnderRoot(extension.resolvedPath, picordRoot)),
-    errors: base.errors.filter((entry) => !isUnderRoot(entry.path, picordRoot)),
+    extensions: base.extensions.filter((extension) => !excluded(extension.resolvedPath)),
+    errors: base.errors.filter((entry) => !excluded(entry.path)),
     runtime: {
       ...base.runtime,
       pendingProviderRegistrations: base.runtime.pendingProviderRegistrations.filter((entry) => {
-        return !isUnderRoot(entry.extensionPath, picordRoot);
+        return !excluded(entry.extensionPath);
       }),
     },
   };

@@ -46,6 +46,7 @@ export class AccessApprovalManager {
   constructor(
     private readonly ownerUserId: string | undefined,
     private readonly notify: (conversationKey: string, content: string) => Promise<void>,
+    private readonly autoApprove = false,
   ) {}
 
   isOwner(userId: string): boolean {
@@ -75,6 +76,10 @@ export class AccessApprovalManager {
   }
 
   async request(input: AccessRequestInput): Promise<void> {
+    if (this.autoApprove) {
+      return; // auto-approve everything, no owner ping
+    }
+
     if (this.alwaysAllowed.has(input.fingerprint)) {
       return;
     }
