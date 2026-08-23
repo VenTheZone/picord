@@ -109,3 +109,36 @@ Set `nvidia-nim.enabled = false` in `~/.pi/agent/dynamic-model-providers.json`. 
 ---
 
 *Document version: 2026-04-23*
+
+## Decision 5: Enforce 1800-char ceiling on live Discord chunks + self-healing renderer flush
+
+### Context
+The live renderer (`src/live-discord-renderer.ts`) chunked assistant content at 2000 chars with `toDiscordChunks`, then added markdown code-fence carry/reopen prefixes and closing fences. A chunk starting with an open fence could grow past Discord's hard 2000-char limit and be rejected by the API. Additionally, `flush()` chained every subsequent flush onto `this.flushPromise.then(...)`; after ONE rejected Discord edit/send, every later flush chained onto the rejected promise and never executed, permanently freezing live rendering. `finalize()` set `finalized = true` before the failing flush, so the `❌` fallback path (`renderer.finalize(...)` called again from the error handler) was a no-op. Non-error early stream termination (user interrupt / superseded run via `sealCurrentMessages()`) ended silently without any truncation marker.
+
+### Decision
+1. `chunkDiscordMarkdown` now budgets content per chunk as `maxLength − carryPrefix.length − FENCE_CLOSER_OVERHEAD`, so the assembled chunk (prefix + content + at most one closing fence) is mathematically guaranteed to stay within `maxLength`. Default `maxLength` changed from 2000 to the exported, documented constant `DISCORD_MESSAGE_EFFECTIVE_LIMIT = 1800`. Code fences stay balanced and readable across chunk boundaries via the existing `ensureClosedCodeFence` / `reopenFencePrefix` helpers.
+2. `flush()` chains with `this.flushPromise.then(execute, execute)`: a rejected flush no longer poisons the chain; the next flush executes. Rejections still surface to awaiting callers; timer-driven flushes log a truncated error (no content/secrets) instead of becoming unhandled rejections.
+3. `finalize()` wraps its flush in try/catch: on failure it sends a concise visible fallback follow-up (`⚠️ Run finished, but the live message could not be updated.`) and rethrows so existing callers keep their error reporting.
+4. `sealCurrentMessages()` (non-error early termination) appends the exported `INCOMPLETE_MARKER` ("…(incomplete — stream ended early)") before its final flush; a public `markIncomplete()` is available for explicit use.
+
+### Code Location
+```
+src/live-discord-renderer.ts
+```
+
+### Consequences
+- ✅ Every outgoing normal assistant-content chunk ≤ 1800 chars (including fence syntax) — API-safe
+- ✅ A failed Discord edit/send no longer freezes rendering; later flushes recover
+- ✅ Failed finalization still shows a visible fallback and preserves caller error reporting
+- ✅ Early/non-error stream termination is explicitly marked instead of silent
+- ⚠️ `toDiscordChunks` (used by non-renderer command paths) keeps its 2000 default — those paths do no fence rebalancing, so 2000 is still API-safe there
+- ⚠️ The 1800 ceiling is a constant, not a runtime config option (no config schema exists for Discord content limits); pass `maxLength` explicitly to `chunkDiscordMarkdown` to override
+
+### Validation
+1. `npm run typecheck` — passed
+2. `npm run lint` — passed
+3. `npm test` — 96/96 passed (5 new regression tests in `src/live-discord-renderer.test.ts`)
+
+---
+
+*Document version: 2026-04-23*

@@ -1,8 +1,40 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, type ChatInputCommandInteraction, type Message } from "discord.js";
-import { toDiscordChunks } from "./conversation.js";
 
 const FLUSH_INTERVAL_MS = 75;
 const RESPONSE_PLACEHOLDER = "_thinking…_";
+
+/**
+ * Discord hard message length limit (characters). Payloads over this are
+ * rejected by the API.
+ */
+export const DISCORD_MESSAGE_HARD_LIMIT = 2000;
+
+/**
+ * Effective ceiling for every outgoing normal assistant-content chunk.
+ *
+ * Discord rejects payloads over `DISCORD_MESSAGE_HARD_LIMIT` chars. Chunking
+ * must never emit a chunk that exceeds the limit even after adding markdown
+ * code-fence carry/reopen prefixes and closing fences, so content is budgeted
+ * below the hard limit with room for the worst-case fence syntax. The 1800
+ * ceiling is deliberately conservative and applies to every outgoing chunk
+ * (including fence reopen/close syntax). Callers that need a different ceiling
+ * can pass `maxLength` explicitly to `chunkDiscordMarkdown`; the per-chunk
+ * guarantee holds for any realistic limit that can fit the fence syntax.
+ */
+export const DISCORD_MESSAGE_EFFECTIVE_LIMIT = 1800;
+
+/**
+ * Short marker appended when a stream terminates early without an error
+ * (user interrupt, superseded run, aborted stream, …) so the sealed message
+ * never ends silently as if it were complete.
+ */
+export const INCOMPLETE_MARKER = "\n\n_…(incomplete — stream ended early)_";
+
+/** Concise visible fallback sent when finalization cannot update the live message. */
+const FINALIZE_FALLBACK_MESSAGE = "⚠️ _Run finished, but the live message could not be updated._";
+
+/** Chars appended by `ensureClosedCodeFence` to balance an open code block. */
+const FENCE_CLOSER_OVERHEAD = "\n```".length;
 
 export type PiLiveUpdate =
   | { type: "assistant_delta"; delta: string }
@@ -95,19 +127,52 @@ export function normalizeDiscordText(text: string): string {
     .trim();
 }
 
-export function chunkDiscordMarkdown(text: string, maxLength: number = 2000): string[] {
-  const baseChunks = toDiscordChunks(text, maxLength);
+export function chunkDiscordMarkdown(text: string, maxLength: number = DISCORD_MESSAGE_EFFECTIVE_LIMIT): string[] {
+  if (!text) return ["Done."];
+
   const chunks: string[] = [];
   let carryPrefix = "";
+  let remaining = text;
 
-  for (const baseChunk of baseChunks) {
-    const withPrefix = `${carryPrefix}${baseChunk}`;
-    const closed = ensureClosedCodeFence(withPrefix).trim();
+  while (remaining.length > 0) {
+    // Budget content so that even after prepending the fence carry/reopen
+    // prefix AND appending the balancing closing fence the assembled chunk
+    // is mathematically guaranteed to stay within `maxLength`:
+    //   assembled = prefix + take <= prefix + (maxLength - prefix - closer)
+    //             = maxLength - closer
+    //   closed    = assembled (+ closer at most) <= maxLength
+    // `.trim()` only shortens, so the bound is exact. Fence state is carried
+    // between chunks via `carryPrefix`, keeping code blocks readable across
+    // chunk boundaries without ever producing an illegal over-long payload.
+    const contentBudget = Math.max(1, maxLength - carryPrefix.length - FENCE_CLOSER_OVERHEAD);
+
+    let take: string;
+    if (remaining.length <= contentBudget) {
+      take = remaining;
+      remaining = "";
+    } else {
+      const slice = remaining.slice(0, contentBudget);
+      // Prefer breaking at a line or word boundary; fall back to a hard slice
+      // (same strategy as the previous implementation) for single over-long
+      // lines so the loop always makes progress.
+      const splitAt = Math.max(slice.lastIndexOf("\n"), slice.lastIndexOf(" "));
+      const index = splitAt > 0 ? splitAt : contentBudget;
+      take = remaining.slice(0, index);
+      remaining = remaining.slice(index);
+    }
+
+    const assembled = `${carryPrefix}${take}`;
+    const closed = ensureClosedCodeFence(assembled).trim();
     chunks.push(closed || "Done.");
-    carryPrefix = reopenFencePrefix(withPrefix);
+    carryPrefix = reopenFencePrefix(assembled);
   }
 
-  return chunks.length > 0 ? chunks : ["Done."];
+  return chunks;
+}
+
+function safeErrorSummary(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length > 200 ? `${message.slice(0, 197)}…` : message;
 }
 
 function summarizeValue(value: unknown, maxLength: number = 80): string | undefined {
@@ -324,6 +389,7 @@ export class LiveDiscordRunRenderer {
   private flushTimer?: NodeJS.Timeout;
   private flushPromise: Promise<void> = Promise.resolve();
   private finalized = false;
+  private incompleteMarked = false;
   private sawAssistantDelta = false;
   private skillLabel?: string;
   private skillDetails?: string;
@@ -487,6 +553,10 @@ export class LiveDiscordRunRenderer {
   async sealCurrentMessages(): Promise<void> {
     if (this.finalized) return;
 
+    // Non-error early termination (user interrupt / superseded run): mark
+    // the sealed message explicitly instead of ending it silently.
+    this.appendIncompleteMarker();
+
     // Cancel any pending timer and do one final flush
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -524,7 +594,41 @@ export class LiveDiscordRunRenderer {
       this.flushTimer = undefined;
     }
 
+    try {
+      await this.flush();
+    } catch (error) {
+      // Finalization flush failed (e.g. a Discord edit/send error). Emit a
+      // concise visible fallback so the user is never left with a frozen or
+      // silently incomplete message, then rethrow so existing callers keep
+      // their error reporting path.
+      console.error(`[picord] finalize flush failed: ${safeErrorSummary(error)}`);
+      await this.sendFallback(FINALIZE_FALLBACK_MESSAGE).catch((fallbackError) => {
+        console.error(`[picord] finalize fallback failed: ${safeErrorSummary(fallbackError)}`);
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Explicitly mark the current stream as ended early without an error.
+   * Appends a short, visible truncation marker so the message never ends
+   * silently as if it were complete.
+   */
+  async markIncomplete(): Promise<void> {
+    if (this.finalized) return;
+    this.appendIncompleteMarker();
     await this.flush();
+  }
+
+  private appendIncompleteMarker(): void {
+    if (this.incompleteMarked) return;
+    this.incompleteMarked = true;
+    const entry = this.activeAssistantEntry ?? this.createAssistantEntry();
+    entry.text += INCOMPLETE_MARKER;
+  }
+
+  private async sendFallback(content: string): Promise<void> {
+    await this.target.createFollowUp({ content });
   }
 
   private createAssistantEntry(): AssistantEntry {
@@ -537,7 +641,12 @@ export class LiveDiscordRunRenderer {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined;
-      void this.flush();
+      // Rejection is logged (truncated, no content/secrets) instead of
+      // producing an unhandled rejection; the next flush still runs thanks
+      // to the self-healing chain in `flush`.
+      void this.flush().catch((error) => {
+        console.error(`[picord] live render flush failed: ${safeErrorSummary(error)}`);
+      });
     }, FLUSH_INTERVAL_MS);
   }
 
@@ -600,8 +709,8 @@ export class LiveDiscordRunRenderer {
     return rendered || RESPONSE_PLACEHOLDER;
   }
 
-  private async flush(): Promise<void> {
-    this.flushPromise = this.flushPromise.then(async () => {
+  async flush(): Promise<void> {
+    const execute = async (): Promise<void> => {
       const rendered = normalizeDiscordText(this.buildTranscript());
       const chunks = chunkDiscordMarkdown(rendered);
 
@@ -617,8 +726,13 @@ export class LiveDiscordRunRenderer {
           : await this.target.createFollowUp(payload);
         this.handles.push(handle);
       }
-    });
+    };
 
+    // Self-healing chain: if a previous flush rejected (e.g. a Discord
+    // edit/follow-up failure), the next flush must still execute instead of
+    // permanently chaining onto the rejected promise and freezing live
+    // rendering. The rejection is still surfaced to this caller via `await`.
+    this.flushPromise = this.flushPromise.then(execute, execute);
     await this.flushPromise;
   }
 }
