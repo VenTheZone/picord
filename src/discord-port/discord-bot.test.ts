@@ -265,6 +265,34 @@ describe("discord-bot message flow", () => {
     );
   });
 
+  it("drops duplicate MESSAGE_CREATE events with the same message id", async () => {
+    const client = createClientStub();
+    const runtime = createRuntimeStub();
+    registerDiscordPortBot({ client, runtime, enableMessageContent: true });
+
+    const dmChannel = {
+      id: "dm-1",
+      type: ChannelType.DM,
+      sendTyping: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
+      isThread: () => false,
+    };
+    const msg = {
+      id: "dup-1",
+      author: { bot: false, username: "V", id: "user-1" },
+      content: "hello",
+      attachments: { size: 0 },
+      inGuild: () => false,
+      channelId: "dm-1",
+      channel: dmChannel,
+      reply: vi.fn(async () => undefined),
+    } as any;
+
+    await client.__emit(Events.MessageCreate, msg);
+    await client.__emit(Events.MessageCreate, msg);
+    expect(runtime.adapter.respond).toHaveBeenCalledTimes(1);
+  });
+
   it("re-batches split incoming messages (>1900 chars) into one prompt", async () => {
     vi.useFakeTimers();
     const client = createClientStub();
@@ -279,7 +307,9 @@ describe("discord-bot message flow", () => {
       send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
       isThread: () => false,
     };
+    let seq = 0;
     const mk = (content: string) => ({
+      id: `chunk-${(seq += 1)}`,
       author: { bot: false, username: "V", id: "user-1" },
       content,
       attachments: { size: 0 },

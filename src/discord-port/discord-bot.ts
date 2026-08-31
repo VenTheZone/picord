@@ -359,6 +359,7 @@ export function registerDiscordPortBot({
           autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
           reason: "picord auto-started session thread",
         });
+        seenIds.add(thread.id); // duplicate starter-message event has id == thread.id
         await thread.members.add(message.author.id).catch(() => undefined);
 
         await thread.sendTyping().catch(() => undefined);
@@ -418,8 +419,21 @@ export function registerDiscordPortBot({
       }
     };
 
+    // Dedup claim (hermes #51057): after startThread(), Discord re-fires the
+    // starter message as a MESSAGE_CREATE inside the thread whose id ==
+    // thread.id. Without this, every auto-thread prompt runs twice.
+    // ponytail: FIFO eviction at 1000 ids; timestamped TTL if bots share state.
+    const seenIds = new Set<string>();
+    const claim = (id: string): boolean => {
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      if (seenIds.size > 1000) seenIds.delete(seenIds.values().next().value as string);
+      return true;
+    };
+
     client.on(Events.MessageCreate, async (message) => {
       if (message.author.bot) return;
+      if (!claim(message.id)) return;
       const key = `${message.channelId}:${message.author.id}`;
       const pending = batches.get(key);
       if (pending) {
