@@ -265,6 +265,42 @@ describe("discord-bot message flow", () => {
     );
   });
 
+  it("re-batches split incoming messages (>1900 chars) into one prompt", async () => {
+    vi.useFakeTimers();
+    const client = createClientStub();
+    const runtime = createRuntimeStub();
+
+    registerDiscordPortBot({ client, runtime, enableMessageContent: true });
+
+    const dmChannel = {
+      id: "dm-1",
+      type: ChannelType.DM,
+      sendTyping: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
+      isThread: () => false,
+    };
+    const mk = (content: string) => ({
+      author: { bot: false, username: "V", id: "user-1" },
+      content,
+      attachments: { size: 0 },
+      inGuild: () => false,
+      channelId: "dm-1",
+      channel: dmChannel,
+      reply: vi.fn(async () => undefined),
+    } as any);
+
+    await client.__emit(Events.MessageCreate, mk("a".repeat(1950)));
+    expect(runtime.adapter.respond).not.toHaveBeenCalled();
+    await client.__emit(Events.MessageCreate, mk("b".repeat(10)));
+    await vi.runAllTimersAsync();
+
+    expect(runtime.adapter.respond).toHaveBeenCalledTimes(1);
+    const prompt = (runtime.adapter.respond as any).mock.calls[0][0].promptText as string;
+    expect(prompt).toContain("a".repeat(1950));
+    expect(prompt).toContain("b".repeat(10));
+    vi.useRealTimers();
+  });
+
   it("starts project-channel messages in a new thread with latest-run semantics", async () => {
     const client = createClientStub();
     const runtime = createRuntimeStub();

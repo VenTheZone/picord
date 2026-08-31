@@ -1,6 +1,17 @@
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import { toDiscordChunks } from "../conversation.js";
 
+// Chunk-flood cap (hermes MAX_SPLIT_MESSAGES): one logical reply <= 8 messages.
+const MAX_REPLY_CHUNKS = 8;
+export function capChunks(chunks: string[]): string[] {
+  if (chunks.length <= MAX_REPLY_CHUNKS) return chunks;
+  const dropped = chunks.slice(MAX_REPLY_CHUNKS - 1).join("").length;
+  return [
+    ...chunks.slice(0, MAX_REPLY_CHUNKS - 1),
+    `⚠️ Response truncated — ${dropped.toLocaleString()} chars not delivered (full text in session logs).`,
+  ];
+}
+
 export function buildPromptFromMessage(message: Message, promptText: string): string {
   const attachments = [...message.attachments.values()]
     .map((attachment) => `- ${attachment.name ?? "attachment"}: ${attachment.url}`)
@@ -36,14 +47,14 @@ export async function sendTextResponse(
   channel: { send: (options: { content: string; allowedMentions: { parse: [] } }) => Promise<unknown> },
   content: string,
 ): Promise<void> {
-  const chunks = toDiscordChunks(content || "Done.");
+  const chunks = capChunks(toDiscordChunks(content || "Done."));
   for (const chunk of chunks) {
     await channel.send({ content: chunk, allowedMentions: { parse: [] } });
   }
 }
 
 export async function replyToMessage(message: Message, content: string): Promise<void> {
-  const chunks = toDiscordChunks(content || "Done.");
+  const chunks = capChunks(toDiscordChunks(content || "Done."));
   const [firstChunk, ...remainingChunks] = chunks;
   if (!firstChunk) {
     return;
@@ -62,7 +73,7 @@ export async function replyToMessage(message: Message, content: string): Promise
 }
 
 export async function replyToInteraction(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
-  const chunks = toDiscordChunks(content || "Done.");
+  const chunks = capChunks(toDiscordChunks(content || "Done."));
   const [firstChunk, ...remainingChunks] = chunks;
   if (!firstChunk) {
     return;

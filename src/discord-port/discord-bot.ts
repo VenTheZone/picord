@@ -6,6 +6,7 @@ import {
   Partials,
   ThreadAutoArchiveDuration,
   type Message,
+  type OmitPartialGroupDMChannel,
   type TextChannel,
 } from "discord.js";
 import {
@@ -75,6 +76,26 @@ function buildAutoThreadName(message: Message): string {
     .replace(/\s+/g, " ")
     .trim();
   return (normalized || "picord session").slice(0, 80);
+}
+
+// Reaction-as-status lifecycle ported from hermes adapter (processing ack ->
+// outcome). Cheap, visible progress signal; all failures ignored — reactions
+// are best-effort.
+async function ackReaction(message: Message): Promise<void> {
+  try {
+    await message.react("👀");
+  } catch {
+    /* reactions best-effort */
+  }
+}
+
+async function finishReaction(message: Message, ok: boolean): Promise<void> {
+  try {
+    await message.reactions?.removeAll();
+    await message.react(ok ? "✅" : "❌");
+  } catch {
+    /* reactions best-effort */
+  }
 }
 
 function isHostControlChannel(
@@ -153,13 +174,25 @@ export function registerDiscordPortBot({
     latestRunIds.get(conversationKey) === runId;
 
   if (enableMessageContent) {
-    client.on(Events.MessageCreate, async (message) => {
+    // Incoming chunk re-batching (ported from hermes adapter): Discord splits
+    // user messages >2000 chars into several MESSAGE_CREATE events arriving ms
+    // apart. Without merging, each chunk aborts the previous run and becomes a
+    // separate prompt. Buffer per channel+author; extend the window when the
+    // last chunk is near the 2000 cap (continuation is then near-certain).
+    const SPLIT_THRESHOLD = 1900;
+    const BATCH_WINDOW_MS = 600;
+    const BATCH_EXTEND_MS = 2000;
+    type PortMessage = OmitPartialGroupDMChannel<Message>;
+    interface PendingBatch { message: PortMessage; text: string; timer: NodeJS.Timeout }
+    const batches = new Map<string, PendingBatch>();
+
+    const processMessage = async (message: PortMessage, mergedText?: string): Promise<void> => {
       try {
         if (message.author.bot) {
           return;
         }
 
-        const promptText = message.content.trim();
+        const promptText = (mergedText ?? message.content).trim();
         if (!promptText && message.attachments.size === 0) {
           return;
         }
@@ -190,16 +223,7 @@ export function registerDiscordPortBot({
           await runtime.adapter.abort(conversationKey).catch(() => false);
           await runtime.adapter.waitForRespondDone(conversationKey);
 
-
-
-
-
-
-
-
-
-
-
+          await ackReaction(message);
           if ("sendTyping" in message.channel) {
             await message.channel.sendTyping().catch(() => undefined);
           }
@@ -229,14 +253,15 @@ export function registerDiscordPortBot({
               return;
             }
             await renderer.finalize(dmResponse);
+            await finishReaction(message, true);
           } catch (error) {
             if (!isLatestRun(conversationKey, runId)) {
               return;
             }
-            console.error(`[picord] DM respond failed:
-`, error);
-          await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
-          return;
+            console.error(`[picord] DM respond failed:`, error);
+            await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+            await finishReaction(message, false);
+            return;
           } finally {
             runtime.adapter.clearLiveRenderer(conversationKey, renderer);
           }
@@ -273,6 +298,7 @@ export function registerDiscordPortBot({
             );
           }
 
+          await ackReaction(message);
           if ("sendTyping" in message.channel) {
             await message.channel.sendTyping().catch(() => undefined);
           }
@@ -300,14 +326,15 @@ export function registerDiscordPortBot({
               return;
             }
             await renderer.finalize(response);
+            await finishReaction(message, true);
           } catch (error) {
             if (!isLatestRun(binding.conversationKey, runId)) {
               return;
             }
-            console.error(`[picord] DM respond failed:
-`, error);
-          await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
-          return;
+            console.error(`[picord] thread respond failed:`, error);
+            await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+            await finishReaction(message, false);
+            return;
           } finally {
             runtime.adapter.clearLiveRenderer(
               binding.conversationKey,
@@ -369,13 +396,14 @@ export function registerDiscordPortBot({
             return;
           }
           await renderer.finalize(response);
+          await finishReaction(message, true);
         } catch (error) {
           if (!isLatestRun(binding.conversationKey, runId)) {
             return;
           }
-          console.error(`[picord] DM respond failed:
-`, error);
+          console.error(`[picord] project-channel respond failed:`, error);
           await renderer.finalize(`❌ ${truncateErrorMessage(String(error))}`).catch(() => undefined);
+          await finishReaction(message, false);
           return;
         } finally {
           runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
@@ -388,6 +416,42 @@ export function registerDiscordPortBot({
           () => undefined,
         );
       }
+    };
+
+    client.on(Events.MessageCreate, async (message) => {
+      if (message.author.bot) return;
+      const key = `${message.channelId}:${message.author.id}`;
+      const pending = batches.get(key);
+      if (pending) {
+        clearTimeout(pending.timer);
+        batches.delete(key);
+        pending.text = `${pending.text}\n${message.content}`;
+        if (message.content.length >= SPLIT_THRESHOLD) {
+          // Still at the cap — more chunks likely; keep buffering.
+          pending.timer = setTimeout(() => {
+            batches.delete(key);
+            void processMessage(pending.message, pending.text);
+          }, BATCH_EXTEND_MS);
+          batches.set(key, pending);
+          return;
+        }
+        await processMessage(pending.message, pending.text);
+        return;
+      }
+      if (message.content.length < SPLIT_THRESHOLD) {
+        // Not a split message — dispatch with zero added latency.
+        await processMessage(message);
+        return;
+      }
+      const batch: PendingBatch = {
+        message,
+        text: message.content,
+        timer: setTimeout(() => {
+          batches.delete(key);
+          void processMessage(message);
+        }, BATCH_WINDOW_MS),
+      };
+      batches.set(key, batch);
     });
   }
 

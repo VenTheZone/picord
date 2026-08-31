@@ -1,7 +1,13 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, type ChatInputCommandInteraction, type Message } from "discord.js";
-import { toDiscordChunks } from "./conversation.js";
 
 const FLUSH_INTERVAL_MS = 75;
+// ponytail: edit-flood backoff ported from hermes stream_consumer (adaptive interval,
+// strikes); per-conversation buckets if multi-channel throughput matters.
+const MAX_FLUSH_INTERVAL_MS = 10_000;
+const MAX_EDIT_STRIKES = 3;
+// Discord chunk-flood cap (hermes MAX_SPLIT_MESSAGES): a 60k reply must not
+// become 31 messages.
+const MAX_LIVE_MESSAGES = 8;
 const RESPONSE_PLACEHOLDER = "_thinking…_";
 
 export type PiLiveUpdate =
@@ -95,16 +101,62 @@ export function normalizeDiscordText(text: string): string {
     .trim();
 }
 
-export function chunkDiscordMarkdown(text: string, maxLength: number = 2000): string[] {
-  const baseChunks = toDiscordChunks(text, maxLength);
-  const chunks: string[] = [];
-  let carryPrefix = "";
+/**
+ * GFM pipe tables -> bullet groups (hermes adapter.py:5774 pattern): Discord
+ * renders no tables, so convert rows to `**header** | cell` lines and drop the
+ * separator row.
+ */
+export function tablesToBullets(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let header: string[] | null = null;
 
-  for (const baseChunk of baseChunks) {
-    const withPrefix = `${carryPrefix}${baseChunk}`;
-    const closed = ensureClosedCodeFence(withPrefix).trim();
-    chunks.push(closed || "Done.");
-    carryPrefix = reopenFencePrefix(withPrefix);
+  const cells = (line: string) =>
+    line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isRow = /^\s*\|.*\|\s*$/.test(line);
+    const isSep = isRow && /^\s*\|?[\s:|-]+\|?\s*$/.test(line) && line.includes("-");
+    if (isRow && isSep && header) continue; // separator row after a seen header
+    if (isRow && !header && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      header = cells(line);
+      continue;
+    }
+    if (header && isRow) {
+      const row = cells(line);
+      out.push(row.map((c, j) => `**${header![j] ?? ""}:** ${c}`).join(" · "));
+      continue;
+    }
+    header = null;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+// Reserve for the "\n```" that ensureClosedCodeFence may append.
+const FENCE_RESERVE = 4;
+
+export function chunkDiscordMarkdown(text: string, maxLength: number = 2000): string[] {
+  const chunks: string[] = [];
+  let carry = "";
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    const budget = Math.max(maxLength - carry.length - FENCE_RESERVE, 1);
+    let cut: number;
+    if (remaining.length <= budget) {
+      cut = remaining.length;
+    } else {
+      const slice = remaining.slice(0, budget);
+      cut = Math.max(slice.lastIndexOf("\n"), slice.lastIndexOf(" "));
+      if (cut <= 0) cut = budget; // hard split; progress guaranteed
+    }
+    const withPrefix = `${carry}${remaining.slice(0, cut)}`;
+    chunks.push(ensureClosedCodeFence(withPrefix).trim() || "Done.");
+    carry = reopenFencePrefix(withPrefix);
+    if (carry.length >= maxLength) carry = ""; // pathological fence, drop reopen
+    remaining = remaining.slice(cut).trim();
   }
 
   return chunks.length > 0 ? chunks : ["Done."];
@@ -323,6 +375,10 @@ export class LiveDiscordRunRenderer {
   private thinkingVisible: boolean;
   private flushTimer?: NodeJS.Timeout;
   private flushPromise: Promise<void> = Promise.resolve();
+  private flushIntervalMs = FLUSH_INTERVAL_MS;
+  private editStrikes = 0;
+  private editsDisabled = false;
+  private readonly lastChunkText: string[] = [];
   private finalized = false;
   private sawAssistantDelta = false;
   private skillLabel?: string;
@@ -497,6 +553,7 @@ export class LiveDiscordRunRenderer {
     // Stop editing the current handles — they're sealed.
     // Next flush will create new follow-up messages.
     this.handles.length = 0;
+    this.lastChunkText.length = 0;
 
     // Reset timeline for the continuation phase
     this.timeline.length = 0;
@@ -525,6 +582,15 @@ export class LiveDiscordRunRenderer {
     }
 
     await this.flush();
+
+    // Edits got flood-disabled mid-run: deliver the final transcript as one
+    // fresh message instead of leaving the sealed placeholder stale.
+    if (this.editsDisabled) {
+      const rendered = normalizeDiscordText(tablesToBullets(this.buildTranscript()));
+      for (const chunk of chunkDiscordMarkdown(rendered)) {
+        await this.target.createFollowUp({ content: chunk }).catch(() => undefined);
+      }
+    }
   }
 
   private createAssistantEntry(): AssistantEntry {
@@ -538,7 +604,7 @@ export class LiveDiscordRunRenderer {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined;
       void this.flush();
-    }, FLUSH_INTERVAL_MS);
+    }, this.flushIntervalMs);
   }
 
   private buildTranscript(): string {
@@ -602,23 +668,61 @@ export class LiveDiscordRunRenderer {
 
   private async flush(): Promise<void> {
     this.flushPromise = this.flushPromise.then(async () => {
-      const rendered = normalizeDiscordText(this.buildTranscript());
-      const chunks = chunkDiscordMarkdown(rendered);
+      if (this.editsDisabled) return;
+      const rendered = normalizeDiscordText(tablesToBullets(this.buildTranscript()));
+      let chunks = chunkDiscordMarkdown(rendered);
+
+      // Flood cap: keep first MAX_LIVE_MESSAGES-1 chunks, last one carries a
+      // truncation notice (hermes MAX_SPLIT_MESSAGES pattern).
+      if (chunks.length > MAX_LIVE_MESSAGES) {
+        const dropped = chunks.slice(MAX_LIVE_MESSAGES - 1).join("").length;
+        chunks = [
+          ...chunks.slice(0, MAX_LIVE_MESSAGES - 1),
+          `⚠️ Response truncated — ${dropped.toLocaleString()} chars not delivered (full text in session logs).`,
+        ];
+      }
 
       for (let index = 0; index < chunks.length; index++) {
-        const payload: LiveMessagePayload = { content: chunks[index] || "Done." };
+        const text = chunks[index] || "Done.";
         const existing = this.handles[index];
         if (existing) {
-          await existing.edit(payload);
+          // Saturated-preview dedup: mid-stream every edit of an over-cap
+          // chunk renders identical text — skip the visual no-op, it only
+          // burns the per-message edit rate limit.
+          if (this.lastChunkText[index] === text) continue;
+          try {
+            await existing.edit({ content: text });
+            this.lastChunkText[index] = text;
+            this.editStrikes = 0;
+          } catch (error) {
+            this.onEditFailure(error);
+          }
           continue;
         }
+        const payload: LiveMessagePayload = { content: text };
         const handle = index === 0
           ? await this.target.ensurePrimary(payload)
           : await this.target.createFollowUp(payload);
         this.handles.push(handle);
+        this.lastChunkText[index] = text;
       }
     });
 
     await this.flushPromise;
+  }
+
+  /**
+   * Adaptive edit-flood backoff (hermes stream_consumer pattern): a failed
+   * edit doubles the flush interval up to MAX_FLUSH_INTERVAL_MS; after
+   * MAX_EDIT_STRIKES consecutive failures editing is disabled for the run
+   * and the final result is delivered as one fresh message instead.
+   */
+  private onEditFailure(error: unknown): void {
+    this.editStrikes += 1;
+    this.flushIntervalMs = Math.min(this.flushIntervalMs * 2, MAX_FLUSH_INTERVAL_MS);
+    if (this.editStrikes >= MAX_EDIT_STRIKES) {
+      this.editsDisabled = true;
+      console.warn(`[picord] edit flood: disabling live edits after ${this.editStrikes} failures`, error instanceof Error ? error.message : error);
+    }
   }
 }
