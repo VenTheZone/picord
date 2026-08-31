@@ -21,6 +21,7 @@ vi.mock("./access-control.js", () => ({
 vi.mock("./message-helpers.js", () => ({
   replyToMessage: replyToMessageMock,
   buildPromptFromMessage: buildPromptFromMessageMock,
+  startTypingLoop: () => () => undefined,
 }));
 
 import { registerDiscordPortBot } from "./discord-bot.js";

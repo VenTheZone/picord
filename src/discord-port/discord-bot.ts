@@ -14,7 +14,8 @@ import {
   createChannelLiveMessageTarget,
 } from "../live-discord-renderer.js";
 import { canAccessDiscordMessage } from "./access-control.js";
-import { buildPromptFromMessage, replyToMessage } from "./message-helpers.js";
+import { buildPromptFromMessage, replyToMessage, startTypingLoop } from "./message-helpers.js";
+import { runBackfill } from "./backfill.js";
 import { registerDiscordPortInteractionHandler } from "./interaction-handler.js";
 import { DiscordPortRuntime } from "./runtime.js";
 import type { DiscordPortRuntimeAdapter } from "./types.js";
@@ -173,6 +174,19 @@ export function registerDiscordPortBot({
   const isLatestRun = (conversationKey: string, runId: number): boolean =>
     latestRunIds.get(conversationKey) === runId;
 
+  // Dedup claim (hermes #51057): after startThread(), Discord re-fires the
+  // starter message as a MESSAGE_CREATE inside the thread whose id ==
+  // thread.id. Without this, every auto-thread prompt runs twice. Also gates
+  // backfill re-dispatch against live events.
+  // ponytail: FIFO eviction at 1000 ids; timestamped TTL if bots share state.
+  const seenIds = new Set<string>();
+  const claim = (id: string): boolean => {
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    if (seenIds.size > 1000) seenIds.delete(seenIds.values().next().value as string);
+    return true;
+  };
+
   if (enableMessageContent) {
     // Incoming chunk re-batching (ported from hermes adapter): Discord splits
     // user messages >2000 chars into several MESSAGE_CREATE events arriving ms
@@ -224,9 +238,7 @@ export function registerDiscordPortBot({
           await runtime.adapter.waitForRespondDone(conversationKey);
 
           await ackReaction(message);
-          if ("sendTyping" in message.channel) {
-            await message.channel.sendTyping().catch(() => undefined);
-          }
+          const stopTyping = startTypingLoop(message.channel);
 
           const runId = nextRunId(conversationKey);
           const thinkingVisible = runtime.adapter.getThinkingVisibility(conversationKey);
@@ -263,6 +275,7 @@ export function registerDiscordPortBot({
             await finishReaction(message, false);
             return;
           } finally {
+            stopTyping();
             runtime.adapter.clearLiveRenderer(conversationKey, renderer);
           }
           return;
@@ -299,9 +312,7 @@ export function registerDiscordPortBot({
           }
 
           await ackReaction(message);
-          if ("sendTyping" in message.channel) {
-            await message.channel.sendTyping().catch(() => undefined);
-          }
+          const stopTyping = startTypingLoop(message.channel);
 
           const runId = nextRunId(binding.conversationKey);
           const thinkingVisible = runtime.adapter.getThinkingVisibility(binding.conversationKey);
@@ -336,6 +347,7 @@ export function registerDiscordPortBot({
             await finishReaction(message, false);
             return;
           } finally {
+            stopTyping();
             runtime.adapter.clearLiveRenderer(
               binding.conversationKey,
               renderer,
@@ -362,7 +374,7 @@ export function registerDiscordPortBot({
         seenIds.add(thread.id); // duplicate starter-message event has id == thread.id
         await thread.members.add(message.author.id).catch(() => undefined);
 
-        await thread.sendTyping().catch(() => undefined);
+        const stopTyping = startTypingLoop(thread);
 
         const binding = runtime.bindThread(thread);
         const runId = nextRunId(binding.conversationKey);
@@ -407,6 +419,7 @@ export function registerDiscordPortBot({
           await finishReaction(message, false);
           return;
         } finally {
+          stopTyping();
           runtime.adapter.clearLiveRenderer(binding.conversationKey, renderer);
         }
       } catch (error) {
@@ -417,18 +430,6 @@ export function registerDiscordPortBot({
           () => undefined,
         );
       }
-    };
-
-    // Dedup claim (hermes #51057): after startThread(), Discord re-fires the
-    // starter message as a MESSAGE_CREATE inside the thread whose id ==
-    // thread.id. Without this, every auto-thread prompt runs twice.
-    // ponytail: FIFO eviction at 1000 ids; timestamped TTL if bots share state.
-    const seenIds = new Set<string>();
-    const claim = (id: string): boolean => {
-      if (seenIds.has(id)) return false;
-      seenIds.add(id);
-      if (seenIds.size > 1000) seenIds.delete(seenIds.values().next().value as string);
-      return true;
     };
 
     client.on(Events.MessageCreate, async (message) => {
@@ -467,6 +468,45 @@ export function registerDiscordPortBot({
       };
       batches.set(key, batch);
     });
+
+  if (enableMessageContent) {
+    // Backfill on every fresh identify (hermes recovery.py): discord.js
+    // self-reconnects the WS, but messages missed while offline are never
+    // replayed — rescan after each ClientReady. In-flight guard keeps
+    // reconnect storms from stacking scans.
+    let backfillRunning = false;
+    client.on(Events.ClientReady, () => {
+      if (backfillRunning) return;
+      backfillRunning = true;
+      void runBackfill(
+        client,
+        runtime.adapter.config,
+        runtime.adapter.listManagedProjects().map((project) => project.channelId),
+        async (channelId, messageId) => {
+          // Claim the raw id: a live MESSAGE_CREATE racing the scan must lose.
+          if (!claim(messageId)) return;
+          const channel = await client.channels.fetch(channelId);
+          if (!channel || !("messages" in channel)) return;
+          const recovered = await channel.messages.fetch(messageId);
+          if (!recovered || recovered.author.bot) return;
+          await processMessage(
+            recovered as Parameters<typeof processMessage>[0],
+            `[Recovered after downtime] ${recovered.content}`,
+          );
+        },
+        (msg) => onError?.(msg),
+      )
+        .then((count) => {
+          if (count > 0) onInfo?.(`backfill: re-dispatched ${count} missed message(s)`);
+        })
+        .catch((error) => {
+          onError?.(`backfill: ${error instanceof Error ? error.message : String(error)}`);
+        })
+        .finally(() => {
+          backfillRunning = false;
+        });
+    });
+  }
   }
 
   client.once(Events.ClientReady, () => {
@@ -522,5 +562,43 @@ export async function startDiscordPortBot({
     multiAuthAccountManager,
   });
   await resolvedClient.login(token);
+
+  // WS liveness watchdog (hermes adapter.py:1909): discord.js self-reconnects
+  // while status flips, but a wedged client can sit non-READY indefinitely
+  // with REST still working — messages silently stop. After STALE_MS off
+  // READY, hard-destroy + fresh login (which also re-triggers backfill).
+  // ponytail: status-based; add heartbeat-ack-age sampling if wedges ever
+  // show up while status stays READY.
+  const STALE_MS = 5 * 60_000;
+  let lastNonReady = resolvedClient.isReady() ? 0 : Date.now();
+  resolvedClient.on(Events.ShardDisconnect, () => {
+    if (!lastNonReady) lastNonReady = Date.now();
+  });
+  resolvedClient.on(Events.ClientReady, () => {
+    lastNonReady = 0;
+  });
+  let warned = false;
+  const watchdog = setInterval(() => {
+    if (!lastNonReady || Date.now() - lastNonReady < STALE_MS) {
+      warned = false;
+      return;
+    }
+    if (!warned) {
+      warned = true;
+      onWarning?.("discord-port: gateway not READY for 5m — forcing reconnect");
+    }
+    resolvedClient.destroy().catch(() => undefined);
+    void resolvedClient.login(token).then(
+      () => {
+        lastNonReady = 0;
+        warned = false;
+      },
+      (error) => {
+        onError?.(`discord-port re-login failed: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    );
+  }, 30_000);
+  watchdog.unref?.();
+
   return { client: resolvedClient, runtime };
 }

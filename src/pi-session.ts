@@ -13,7 +13,9 @@ import {
   type AgentSession,
   type SessionInfo,
   type Skill,
+  type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -21,6 +23,30 @@ import { getGitStatusFingerprint, shareGitDiff } from "./critique.js";
 
 // Mirror of pi's resolveCliModel custom-id fallback: registry.find() misses
 // models only known to dynamic providers (e.g. opencode/deepseek-v4-flash-free).
+// Outbound file upload (hermes send_file pattern): lets the agent deliver
+// generated artifacts (images, patches, archives) instead of pasting them.
+// Path is guard-resolved, so workspace policy + approval flow still apply.
+function createSendFileTool(
+  guard: WorkspaceGuard,
+  conversationKey: string,
+  sendFile: (conversationKey: string, absolutePath: string, caption?: string) => Promise<string>,
+): ToolDefinition {
+  return {
+    name: "send_file",
+    label: "send_file",
+    description: "Send a file from the workspace to the current Discord conversation",
+    parameters: Type.Object({
+      path: Type.String({ description: "File path relative to the workspace" }),
+      caption: Type.Optional(Type.String({ description: "Optional message above the file" })),
+    }),
+    execute: async (_toolCallId: string, params: { path: string; caption?: string }) => {
+      const absolutePath = guard.resolveInputPath(params.path);
+      const url = await sendFile(conversationKey, absolutePath, params.caption);
+      return { content: [{ type: "text", text: `Sent ${params.path} (${url})` }], details: { url } };
+    },
+  } satisfies ToolDefinition;
+}
+
 function fallbackModel(
   provider: string,
   id: string,
@@ -212,6 +238,11 @@ export class PiSessionPool {
     runId: number | undefined,
     update: PiLiveUpdate,
   ) => Promise<void>;
+  private readonly sendFile?: (
+    conversationKey: string,
+    absolutePath: string,
+    caption?: string,
+  ) => Promise<string>;
 
   constructor(
     private readonly config: PicordRuntimeConfig,
@@ -224,7 +255,13 @@ export class PiSessionPool {
       runId: number | undefined,
       update: PiLiveUpdate,
     ) => Promise<void>,
+    sendFile?: (
+      conversationKey: string,
+      absolutePath: string,
+      caption?: string,
+    ) => Promise<string>,
   ) {
+    this.sendFile = sendFile;
     this.approvals = new AccessApprovalManager(
       config.ownerUserId,
       notifyAccessRequest,
@@ -1422,6 +1459,9 @@ export class PiSessionPool {
       customTools: [
         ...tools,
         ...createSafeCustomTools(workspaceState.guard, accessContext),
+        ...(this.sendFile
+          ? [createSendFileTool(workspaceState.guard, options.conversationKey, this.sendFile)]
+          : []),
         ...(await loadMCPTools({ exaApiKey: this.config.exaApiKey })).tools.map((t) => t.tool),
       ],
       scopedModels: scopedModels.length > 0 ? scopedModels : undefined,

@@ -5,7 +5,10 @@ import { type LiveDiscordRunRenderer, type PiLiveUpdate } from "../live-discord-
 import { PiSessionPool } from "../pi-session.js";
 import { clearRestartNotification, readRestartNotification } from "../restart-notification.js";
 import { RuntimeLock } from "../runtime-lock.js";
+import { AttachmentBuilder } from "discord.js";
 import { sendTextResponse } from "./message-helpers.js";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { PiSessionPoolAdapter } from "./pi-runtime-adapter.js";
 import { buildDiscordPortCommands } from "./command-registration.js";
 import { buildAllMultiAuthCommands } from "./multi-auth-commands.js";
@@ -197,7 +200,20 @@ export async function startDiscordPortExtensionRuntime({
     }
   };
 
-  const sessionPool = new PiSessionPool(config, notifyAccessRequest, notifyConversation);
+  // Outbound file upload for the send_file agent tool: resolve the
+  // conversation's channel, attach the (already guard-checked) file.
+  const sendFile = async (conversationKey: string, absolutePath: string, caption?: string): Promise<string> => {
+    const channelId = getChannelIdFromConversationKey(conversationKey);
+    if (!channelId || !client) throw new Error("Discord channel unavailable for this session");
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !("send" in channel)) throw new Error(`Channel ${channelId} is unavailable`);
+    if (caption) await sendTextResponse(channel, caption);
+    const attachment = new AttachmentBuilder(absolutePath);
+    const sent = await channel.send({ files: [attachment], allowedMentions: { parse: [] } });
+    return sent.url;
+  };
+
+  const sessionPool = new PiSessionPool(config, notifyAccessRequest, notifyConversation, sendFile);
   await sessionPool.initialize();
   const adapter = new PiSessionPoolAdapter(config, sessionPool, liveRenderers);
 
@@ -222,11 +238,31 @@ export async function startDiscordPortExtensionRuntime({
       ...buildDiscordPortCommands(skillSummaries),
       ...buildAllMultiAuthCommands(providerList),
     ];
+    // Command-tree fingerprint (hermes adapter.py:2216): re-PUTting the tree
+    // on every boot burns the global rate limit — a classic global-ban vector.
+    const scope = config.allowedGuildIds.join(",") || "global";
+    const fingerprint = createHash("sha256")
+      .update(scope + JSON.stringify(commands))
+      .digest("hex");
+    const fpPath = `${config.statePath}.commands.json`;
+    try {
+      if (existsSync(fpPath)) {
+        const prev = JSON.parse(readFileSync(fpPath, "utf8")) as { fingerprint?: string };
+        if (prev.fingerprint === fingerprint) return; // unchanged tree, skip sync
+      }
+    } catch {
+      /* stale/corrupt cache -> re-sync */
+    }
     if (config.allowedGuildIds.length > 0) {
       await Promise.all(config.allowedGuildIds.map((guildId) => discordClient.application!.commands.set(commands, guildId)));
-      return;
+    } else {
+      await discordClient.application.commands.set(commands);
     }
-    await discordClient.application.commands.set(commands);
+    try {
+      writeFileSync(fpPath, JSON.stringify({ fingerprint }));
+    } catch {
+      /* non-fatal; worst case next boot re-syncs */
+    }
   };
 
   const cleanup = async (reason?: string) => {

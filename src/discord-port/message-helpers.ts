@@ -43,6 +43,26 @@ export function buildPromptFromInteraction(interaction: ChatInputCommandInteract
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
+// Typing indicator loop (hermes adapter.py:5588): indicator expires ~10s, so
+// re-send on an interval; swallow every failure (429 included) and keep going
+// — only stop() ends the loop.
+export function startTypingLoop(channel: { sendTyping?: () => Promise<unknown> }): () => void {
+  if (!channel.sendTyping) return () => undefined;
+  let stopped = false;
+  const ping = () => {
+    void channel.sendTyping?.().catch(() => undefined);
+  };
+  ping();
+  const timer = setInterval(() => {
+    if (stopped) return;
+    ping();
+  }, 10_000);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 export async function sendTextResponse(
   channel: { send: (options: { content: string; allowedMentions: { parse: [] } }) => Promise<unknown> },
   content: string,
