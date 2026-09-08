@@ -1,4 +1,5 @@
 export type ToolMode = "read-only" | "coding";
+export type SessionMode = "thread" | "channel";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type CavemanLevel = "off" | "lite" | "full" | "ultra" | "wenyan-lite" | "wenyan-full" | "wenyan-ultra";
 export type MultiAuthRotationMode = "round-robin" | "usage-based" | "balancer";
@@ -44,6 +45,7 @@ export interface PicordFileConfig {
   workspaceBasePath?: string;
   workspaceRoots?: Record<string, string>;
   toolMode?: ToolMode;
+  sessionMode?: SessionMode;
   allowedGuildIds?: string[];
   allowedChannelIds?: string[];
   allowedRoleIds?: string[];
@@ -76,6 +78,7 @@ export interface PicordRuntimeConfig extends PicordFileConfig {
   workspaceBasePath: string;
   workspaceRoots: Record<string, string>;
   toolMode: ToolMode;
+  sessionMode: SessionMode;
   allowDm: boolean;
   allowedGuildIds: string[];
   allowedChannelIds: string[];

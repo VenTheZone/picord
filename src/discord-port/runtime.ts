@@ -206,6 +206,7 @@ export class DiscordPortRuntime {
       boundSession?.name ? `boundSessionName: ${boundSession.name}` : undefined,
       boundSession?.path ? `boundSessionPath: ${boundSession.path}` : undefined,
       `managedProjectChannel: ${managedProjectChannel}`,
+      `sessionMode: ${this.adapter.config.sessionMode}`,
       `activeSessions: ${this.adapter.getSessionCount()}`,
       effectiveModel ? `activeModel: ${effectiveModel.provider}/${effectiveModel.id}` : undefined,
       `activeThinkingLevel: ${effectiveThinkingLevel}`,
@@ -260,7 +261,9 @@ export class DiscordPortRuntime {
       `hostChannelId: ${this.adapter.config.hostChannelId ?? "(unresolved)"}`,
       `activeSessions: ${this.adapter.getSessionCount()}`,
       `skills: ${this.adapter.getSkillSummaries().length}`,
-      "Send a message in a managed project channel to start a thread session.",
+      this.adapter.config.sessionMode === "channel"
+        ? "Send a message in a managed project channel to use its channel session."
+        : "Send a message in a managed project channel to start a thread session.",
     ].join("\n");
   }
 

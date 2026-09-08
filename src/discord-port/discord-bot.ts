@@ -360,6 +360,64 @@ export function registerDiscordPortBot({
           return;
         }
 
+        if (runtime.adapter.config.sessionMode === "channel") {
+          const workspaceKey = runtime.buildWorkspaceKey(
+            message.guildId!,
+            message.channel.id,
+          );
+          const conversationKey = runtime.buildConversationKeyForProjectChannel(
+            message.guildId!,
+            message.channel.id,
+          );
+
+          if (runtime.adapter.isStreaming(conversationKey)) {
+            await runtime.adapter.sealLiveRenderer(conversationKey);
+            runtime.adapter.clearLiveRenderer(conversationKey);
+            await runtime.adapter.abort(conversationKey).catch(() => false);
+            await runtime.adapter.waitForRespondDone(conversationKey);
+          }
+
+          await ackReaction(message);
+          const stopTyping = startTypingLoop(message.channel);
+          const runId = nextRunId(conversationKey);
+          const thinkingVisible =
+            runtime.adapter.getThinkingVisibility(conversationKey);
+          const renderer = new LiveDiscordRunRenderer(
+            createChannelLiveMessageTarget(message.channel),
+            { thinkingVisible },
+          );
+          await renderer.showThinkingPlaceholder().catch(() => undefined);
+          runtime.adapter.registerLiveRenderer(conversationKey, renderer, runId);
+          try {
+            const response = await runtime.adapter.respond({
+              conversationKey,
+              workspaceKey,
+              sessionName: message.channel.name,
+              promptText: buildPromptFromMessage(message, promptText),
+              runId,
+            });
+            if (!isLatestRun(conversationKey, runId)) {
+              return;
+            }
+            await renderer.finalize(response);
+            await finishReaction(message, true);
+          } catch (error) {
+            if (!isLatestRun(conversationKey, runId)) {
+              return;
+            }
+            console.error(`[picord] project-channel respond failed:`, error);
+            await renderer
+              .finalize(`❌ ${truncateErrorMessage(String(error))}`)
+              .catch(() => undefined);
+            await finishReaction(message, false);
+            return;
+          } finally {
+            stopTyping();
+            runtime.adapter.clearLiveRenderer(conversationKey, renderer);
+          }
+          return;
+        }
+
         // Only auto-create threads when the bot is mentioned, so channel
         // chatter doesn't spawn sessions.
         if (!message.mentions.has(client.user?.id ?? "")) {

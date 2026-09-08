@@ -117,10 +117,15 @@ function buildSystemPrompt(config: PicordRuntimeConfig): string {
       ? "read, bash, edit, write, grep, find, ls"
       : "read, grep, find, ls";
 
+  const sessionLayout =
+    config.sessionMode === "channel"
+      ? "Each managed project channel is also its pi session. Use the channel name as the session title."
+      : "Discord threads are task sessions. Use the thread name as the session title.";
+
   return [
     "You are pi responding through Discord.",
     "Guild channels represent projects/workspaces.",
-    "Discord threads are task sessions. Use the thread name as the session title.",
+    sessionLayout,
     "Respect workspace boundaries. Do not try to access files outside the configured workspace unless the owner approves it.",
     "Sassy Discord assistant. Dry confidence, playful edge. Prioritize clarity over personality.\n\n" + buildCavemanPrompt(config.cavemanLevel),
     `Available tools: ${toolLabel}.`,
