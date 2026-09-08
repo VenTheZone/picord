@@ -50,7 +50,7 @@ function createClientStub() {
 
 function createRuntimeStub() {
   const adapter = {
-    config: { hostChannelName: "host" },
+    config: { hostChannelName: "host", sessionMode: "thread" },
     isManagedProjectChannel: vi.fn(
       (channelId: string) => channelId === "project-1" || channelId.startsWith("thread-"),
     ),
@@ -70,6 +70,14 @@ function createRuntimeStub() {
 
   return {
     adapter,
+    buildWorkspaceKey: vi.fn(
+      (guildId: string, channelId: string) =>
+        `discord:guild:${guildId}:workspace:${channelId}`,
+    ),
+    buildConversationKeyForProjectChannel: vi.fn(
+      (guildId: string, channelId: string) =>
+        `discord:guild:${guildId}:channel:${channelId}`,
+    ),
     bindThread: vi.fn((thread: any) => ({
       thread,
       workspaceKey: `discord:guild:${thread.guildId}:workspace:${thread.parentId ?? thread.id}`,
@@ -385,4 +393,50 @@ describe("discord-bot message flow", () => {
       }),
     );
   });
+  it("uses the managed project channel itself as the session in channel mode", async () => {
+    const client = createClientStub();
+    const runtime = createRuntimeStub();
+    runtime.adapter.config.sessionMode = "channel";
+
+    registerDiscordPortBot({ client, runtime, enableMessageContent: true });
+
+    const channel = {
+      id: "project-1",
+      type: ChannelType.GuildText,
+      sendTyping: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ edit: vi.fn(async () => undefined) })),
+      name: "project-1",
+      isThread: () => false,
+    };
+    const startThread = vi.fn();
+    const message = {
+      id: "message-channel-mode",
+      author: { bot: false, username: "V", id: "user-1" },
+      content: "continue here",
+      attachments: { size: 0 },
+      inGuild: () => true,
+      guildId: "guild-1",
+      channelId: "project-1",
+      channel,
+      mentions: { has: () => false },
+      startThread,
+      react: vi.fn(async () => undefined),
+      reactions: { removeAll: vi.fn(async () => undefined) },
+      reply: vi.fn(async () => undefined),
+    } as any;
+
+    await client.__emit(Events.MessageCreate, message);
+
+    expect(startThread).not.toHaveBeenCalled();
+    expect(runtime.adapter.respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "discord:guild:guild-1:channel:project-1",
+        workspaceKey: "discord:guild:guild-1:workspace:project-1",
+        sessionName: "project-1",
+        promptText: "continue here",
+        runId: 1,
+      }),
+    );
+  });
+
 });

@@ -8,16 +8,20 @@ It lets you use pi from Discord while keeping pi’s native sessions, models, sk
 
 ## Mental model
 
-In a guild:
+In a guild, the default `sessionMode: "thread"` behavior is:
 - a **project channel** maps to a local workspace
 - a **thread** inside that channel maps to a pi session
 - the **thread title** becomes the session name
 
+If you prefer a flatter Discord layout, set `sessionMode: "channel"`:
+- a managed **project channel** maps to both the workspace and its pi session
+- normal messages continue that channel session directly
+- picord does not auto-create a thread for each new prompt
+
 In DMs:
 - the DM acts like a direct personal session
 
-If you remember one thing, remember this:
-**channel = workspace, thread = session**.
+The default remains **channel = workspace, thread = session** for backward compatibility.
 
 ## Runtime
 
@@ -218,6 +222,7 @@ export PICORD_EXA_API_KEY=your_exa_api_key
   "workspaceBasePath": "~/.picord/workspace",
   "workspaceRoots": {},
   "toolMode": "coding",
+  "sessionMode": "thread",
   "allowedGuildIds": ["123"],
   "allowedChannelIds": [],
   "allowedRoleIds": [],
@@ -240,6 +245,7 @@ export PICORD_EXA_API_KEY=your_exa_api_key
 - `statePath`: persistent state for managed project channels and thread/session bindings
 - `workspaceBasePath`: base directory used by `/project-create`; defaults to `~/.picord/workspace`
 - `workspaceRoots`: optional static mapping of project channel ID → local workspace path; leave it empty if you want `/project-create` to manage channels and workspace folders
+- `sessionMode`: `thread` (default) keeps channel = workspace / thread = session; `channel` uses each managed project channel as its pi session directly
 - `allowedChannelIds`: static channel allowlist; bot-managed project channels are added from state
 - `allowedRoleIds` / `allowedRoleNames`: required guild roles for normal bot usage
 - `allowedUserIds`: explicit user allowlist

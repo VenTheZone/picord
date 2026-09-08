@@ -5,6 +5,7 @@
   "workspaceBasePath": "~/.picord/workspace",
   "workspaceRoots": {},
   "toolMode": "coding",
+  "sessionMode": "thread",
   "allowedGuildIds": ["YOUR_GUILD_ID"],
   "allowedChannelIds": [],
   "allowedRoleIds": [],

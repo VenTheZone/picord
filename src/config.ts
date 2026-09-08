@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { CavemanLevel, PicordFileConfig, PicordRuntimeConfig, ThinkingLevel, ToolMode } from "./types.js";
+import type { CavemanLevel, PicordFileConfig, PicordRuntimeConfig, SessionMode, ThinkingLevel, ToolMode } from "./types.js";
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 const DEFAULT_CAVEMAN_LEVEL: CavemanLevel = "off";
 const DEFAULT_TOOL_MODE: ToolMode = "coding";
+const DEFAULT_SESSION_MODE: SessionMode = "thread";
 const DEFAULT_WORKSPACE_BASE_PATH = path.join(homedir(), ".picord", "workspace");
 const DEFAULT_HOST_CHANNEL_NAME = "host";
 
@@ -24,6 +25,10 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
 
 function normalizeToolMode(value: unknown): ToolMode {
   return value === "read-only" ? "read-only" : DEFAULT_TOOL_MODE;
+}
+
+function normalizeSessionMode(value: unknown): SessionMode {
+  return value === "channel" ? "channel" : DEFAULT_SESSION_MODE;
 }
 
 function resolvePathValue(baseDir: string, value: string): string {
@@ -132,6 +137,7 @@ export function loadRuntimeConfig(
     workspaceBasePath,
     workspaceRoots: normalizeWorkspaceRoots(fileConfig.workspaceRoots, baseDir),
     toolMode: normalizeToolMode(fileConfig.toolMode),
+    sessionMode: normalizeSessionMode(fileConfig.sessionMode),
     allowDm: normalizeBoolean(fileConfig.allowDm, true),
     allowedGuildIds: normalizeStringArray(fileConfig.allowedGuildIds),
     allowedChannelIds: normalizeStringArray(fileConfig.allowedChannelIds),

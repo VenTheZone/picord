@@ -239,10 +239,27 @@ function requireThread(interaction: ChatInputCommandInteraction) {
   return channel;
 }
 
-function requireSessionThreadIfGuild(interaction: ChatInputCommandInteraction) {
+function getSessionThreadIfGuild(
+  interaction: ChatInputCommandInteraction,
+  runtime: DiscordPortRuntime,
+) {
   if (!interaction.guildId) {
     return undefined;
   }
+
+  const channel = interaction.channel;
+  if (channel?.isThread()) {
+    return channel;
+  }
+
+  if (
+    runtime.adapter.config.sessionMode === "channel" &&
+    channel?.type === ChannelType.GuildText &&
+    runtime.adapter.isManagedProjectChannel(channel.id)
+  ) {
+    return undefined;
+  }
+
   return requireThread(interaction);
 }
 
@@ -748,6 +765,29 @@ export function registerDiscordPortInteractionHandler({
         if (!channel || channel.type !== ChannelType.GuildText) {
           throw new Error("Project channel could not be loaded.");
         }
+        if (runtime.adapter.config.sessionMode === "channel") {
+          const workspaceKey = runtime.buildWorkspaceKey(
+            interaction.guild.id,
+            channel.id,
+          );
+          const conversationKey = runtime.buildConversationKeyForProjectChannel(
+            interaction.guild.id,
+            channel.id,
+          );
+          await runtime.adapter.resumeSession({
+            conversationKey,
+            workspaceKey,
+            sessionName: channel.name,
+            sessionReference: session.id,
+          });
+
+          await interaction.update({
+            content: `Resumed session ${session.id} directly in <#${created.textChannelId}> (${session.cwd})`,
+            components: [],
+          });
+          return;
+        }
+
         const thread = await channel.threads.create({
           name: (
             session.name?.trim() || `${session.projectName} session`
@@ -1847,7 +1887,12 @@ export function registerDiscordPortInteractionHandler({
           .getString("model", true)
           .trim();
 
-        if (thread || !interaction.guildId) {
+        if (
+          thread ||
+          !interaction.guildId ||
+          (runtime.adapter.config.sessionMode === "channel" &&
+            runtime.adapter.isManagedProjectChannel(interaction.channelId))
+        ) {
           const model = await runtime.adapter.setConversationModel(
             conversationKey,
             workspaceKey,
@@ -1899,7 +1944,12 @@ export function registerDiscordPortInteractionHandler({
           true,
         ) as import("../types.js").ThinkingLevel;
 
-        if (thread || !interaction.guildId) {
+        if (
+          thread ||
+          !interaction.guildId ||
+          (runtime.adapter.config.sessionMode === "channel" &&
+            runtime.adapter.isManagedProjectChannel(interaction.channelId))
+        ) {
           runtime.adapter.setConversationThinkingLevel(
             conversationKey,
             workspaceKey,
@@ -1921,7 +1971,7 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "think-visibility") {
-        const thread = requireSessionThreadIfGuild(interaction);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
         const conversationKey = runtime.getConversationKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -1939,7 +1989,7 @@ export function registerDiscordPortInteractionHandler({
       }
 
   if (interaction.commandName === "caveman") {
-    const thread = requireSessionThreadIfGuild(interaction);
+    const thread = getSessionThreadIfGuild(interaction, runtime);
     const conversationKey = runtime.getConversationKeyForLocation({
       guildId: interaction.guildId,
       channelId: interaction.channelId,
@@ -1958,7 +2008,7 @@ export function registerDiscordPortInteractionHandler({
   }
 
       if (interaction.commandName === "ask") {
-        const thread = requireSessionThreadIfGuild(interaction);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -2007,18 +2057,32 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "resume") {
-        requireGuild(interaction);
-        const thread = requireThread(interaction);
-        const binding = runtime.bindThread(thread);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
+        const workspaceKey = runtime.getWorkspaceKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const sessionName = runtime.getSessionNameForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          username: interaction.user.username,
+          thread,
+        });
         const resumed = await runtime.adapter.resumeSession({
-          conversationKey: binding.conversationKey,
-          workspaceKey: binding.workspaceKey,
-          sessionName: binding.sessionName,
+          conversationKey,
+          workspaceKey,
+          sessionName,
           sessionReference: interaction.options.getString("session", true),
         });
 
         await interaction.reply({
-          content: `Bound this thread to pi session ${resumed.id} (${resumed.name ?? "unnamed"}) from ${resumed.cwd}`,
+          content: `Bound this Discord session to pi session ${resumed.id} (${resumed.name ?? "unnamed"}) from ${resumed.cwd}`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -2087,10 +2151,13 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "abort") {
-        requireGuild(interaction);
-        const thread = requireThread(interaction);
-        const binding = runtime.bindThread(thread);
-        const aborted = await runtime.adapter.abort(binding.conversationKey);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const aborted = await runtime.adapter.abort(conversationKey);
         await interaction.reply({
           content: aborted
             ? "Active run aborted."
@@ -2101,13 +2168,16 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "reset") {
-        requireGuild(interaction);
-        const thread = requireThread(interaction);
-        const binding = runtime.bindThread(thread);
-        const reset = await runtime.adapter.reset(binding.conversationKey);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        const reset = await runtime.adapter.reset(conversationKey);
         await interaction.reply({
           content: reset
-            ? "Cleared the bound pi session for this thread."
+            ? "Cleared the bound pi session for this Discord session."
             : "No bound session to clear.",
           flags: MessageFlags.Ephemeral,
         });
@@ -2115,14 +2185,17 @@ export function registerDiscordPortInteractionHandler({
       }
 
       if (interaction.commandName === "refresh-session") {
-        requireGuild(interaction);
-        const thread = requireThread(interaction);
-        const binding = runtime.bindThread(thread);
-        await runtime.adapter.abort(binding.conversationKey).catch(() => false);
-        await runtime.adapter.reset(binding.conversationKey);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
+        const conversationKey = runtime.getConversationKeyForLocation({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          thread,
+        });
+        await runtime.adapter.abort(conversationKey).catch(() => false);
+        await runtime.adapter.reset(conversationKey);
         await interaction.reply({
           content:
-            "This thread session was refreshed. Send your next message again to start a clean session.",
+            "This Discord session was refreshed. Send your next message again to start a clean session.",
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -2304,7 +2377,7 @@ export function registerDiscordPortInteractionHandler({
 
       const skillCommand = findSkillCommand(interaction.commandName, runtime);
       if (skillCommand) {
-        const thread = requireSessionThreadIfGuild(interaction);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
         const workspaceKey = runtime.getWorkspaceKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -2351,7 +2424,7 @@ export function registerDiscordPortInteractionHandler({
         interaction.commandName === "compact" ||
         interaction.commandName === "auto-compact"
       ) {
-        const thread = requireSessionThreadIfGuild(interaction);
+        const thread = getSessionThreadIfGuild(interaction, runtime);
         const conversationKey = runtime.getConversationKeyForLocation({
           guildId: interaction.guildId,
           channelId: interaction.channelId,
